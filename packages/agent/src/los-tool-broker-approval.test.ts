@@ -32,10 +32,15 @@ function stubRegistry(executed: { count: number }): ToolRegistry {
   } as unknown as ToolRegistry;
 }
 
-function brokerInput(executed: { count: number }, events: Record<string, unknown>[], enforcement: 'warn' | 'block') {
+function brokerInput(
+  executed: { count: number },
+  events: Record<string, unknown>[],
+  enforcement?: 'warn' | 'block',
+  config: AgentConfig = {} as AgentConfig,
+) {
   return {
     tools: stubRegistry(executed),
-    config: {} as AgentConfig,
+    config,
     signal: undefined,
     policy: { retry: {} } as never,
     emitEvent: async (event: Record<string, unknown>) => {
@@ -76,4 +81,21 @@ test('block mode refuses a needsApproval tool before the handler runs', async ()
   assert.equal((blocked!.payload as Record<string, unknown>).action, 'block');
   const denied = events.find(event => event.type === 'tool.denied');
   assert.equal((denied!.payload as Record<string, unknown>).reasonCode, 'tool_approval_required');
+});
+
+test('stateless execution blocks approval-required tools by construction', async () => {
+  const executed = { count: 0 };
+  const events: Record<string, unknown>[] = [];
+  const broker = createLosToolBroker(
+    brokerInput(executed, events, undefined, { executionMode: 'stateless' } as AgentConfig),
+  );
+
+  const result = await broker.execute({ callId: 'c3', name: 'run_shell', arguments: {}, turn: 1 });
+
+  assert.equal(result.denied, true, 'a stateless executor has no approval channel');
+  assert.match(result.error ?? '', /no approval channel is wired/);
+  assert.equal(executed.count, 0, 'the handler must not run on a stateless executor');
+  const blocked = events.find(event => event.type === 'tool.approval_required');
+  assert.ok(blocked, 'expected a tool.approval_required event');
+  assert.equal((blocked!.payload as Record<string, unknown>).enforcementMode, 'block');
 });

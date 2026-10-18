@@ -38,6 +38,9 @@ export interface SpawnAgentRunnerOptions {
   workspaceRoot?: string;
   /** Parent tool mode. Children cannot exceed this (read-only parent ⇒ read-only child). */
   parentToolMode?: 'read-only' | 'project-write' | 'all';
+  /** Inherit the parent's execution channel so a stateless parent cannot spawn
+   *  a child that falls back to warn-by-default approval. */
+  executionMode?: AgentConfig['executionMode'];
   traceId?: string;
   requestId?: string;
   runSpecId?: string;
@@ -590,6 +593,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         maxLoops: childMaxLoops,
         workspaceRoot: options.workspaceRoot,
         toolMode: childToolMode,
+        executionMode: options.executionMode,
         allowedTools: childAllowedTools(childToolMode),
         toolRetry: options.toolRetry,
         signal: abortController.signal,
@@ -664,6 +668,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
+      executionMode: options.executionMode,
       allowedTools: childAllowedTools(childToolMode),
       toolRetry: options.toolRetry,
       signal: options.signal,

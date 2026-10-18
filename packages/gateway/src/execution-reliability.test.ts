@@ -15,8 +15,10 @@ import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
 import { _LeaseLostError, transitionExecutionState } from '@los/agent/execution-store';
 import { listSessionEvents } from '@los/agent/session-events';
 import { createTaskRun, heartbeatTaskRun, loadTaskRun } from '@los/agent/task-runs';
+import { createScheduledWorkItem, loadScheduledWorkItem, loadScheduledWorkItemRun } from '@los/agent';
 import { createRunSpec, loadRunSpec } from '@los/agent/run-specs';
-import { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execution-lease-reaper.js';
+import { _convergeOrphanedScheduledRuns, reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execution-lease-reaper.js';
+import { _convergeScheduledRunForCompletion } from './routes/orchestration/task-complete-routes.js';
 
 test('two gateways preserve long work and recover crash, notify, and lease failures', async () => {
   const config = await loadConfig();
@@ -259,3 +261,198 @@ test('stale-running sweep blocks orphaned run_specs and preserves active ones', 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+async function assertIsolatedSchema(): Promise<void> {
+  const row = await getDb().query<{ schema: string }>('SELECT current_schema() AS schema');
+  assert.notEqual(
+    row.rows[0]?.schema,
+    'public',
+    'execution-reliability tests must run with the package test setup (isolated schema), not the live public schema',
+  );
+}
+
+test('orphan sweep converges a claimed run with a succeeded task to succeeded', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await assertIsolatedSchema();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runId = `schedule-run-succeeded-${suffix}`;
+  const taskRunId = `task-succeeded-${suffix}`;
+  const sessionId = `session-succeeded-${suffix}`;
+  const db = getDb();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los',
+    title: `succeeded-convergence-${suffix}`,
+    trigger: { kind: 'once', expression: new Date(Date.now() + 3_600_000).toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+  });
+  try {
+    await db.query(
+      `INSERT INTO scheduled_work_item_runs
+         (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts)
+       VALUES ($1,$2,now(),'scheduled','claimed',1,2)`,
+      [runId, schedule.id],
+    );
+    await createTaskRun({
+      id: taskRunId,
+      sessionId,
+      status: 'succeeded',
+      workspaceRoot: '/tmp',
+      toolMode: 'read-only',
+      promptPreview: 'succeeded convergence fixture',
+      metadata: {
+        scheduledWork: { runId },
+        completionResult: { ok: true, fixture: true },
+      },
+    });
+
+    const converged = await _convergeOrphanedScheduledRuns('test_succeeded_sweep');
+    assert.ok(converged >= 1);
+    const run = await loadScheduledWorkItemRun(runId);
+    assert.equal(run?.status, 'succeeded', 'a succeeded task must not be converged to failed');
+    assert.deepEqual(run?.resultSummary, { ok: true, fixture: true });
+  } finally {
+    await db.query('DELETE FROM scheduled_work_item_runs WHERE id=$1', [runId]).catch(() => undefined);
+    await db.query('DELETE FROM task_runs WHERE id=$1', [taskRunId]).catch(() => undefined);
+    await db.query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]).catch(() => undefined);
+  }
+});
+
+test('orphan sweep never touches a run with an active retry', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await assertIsolatedSchema();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runId = `schedule-run-active-retry-${suffix}`;
+  const oldTaskId = `task-old-failed-${suffix}`;
+  const activeTaskId = `task-active-retry-${suffix}`;
+  const sessionId = `session-active-retry-${suffix}`;
+  const db = getDb();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los',
+    title: `active-retry-${suffix}`,
+    trigger: { kind: 'once', expression: new Date(Date.now() + 3_600_000).toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+  });
+  try {
+    await db.query(
+      `INSERT INTO scheduled_work_item_runs
+         (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts)
+       VALUES ($1,$2,now(),'scheduled','claimed',1,2)`,
+      [runId, schedule.id],
+    );
+    await createTaskRun({
+      id: oldTaskId, sessionId, status: 'failed', workspaceRoot: '/tmp', toolMode: 'read-only',
+      promptPreview: 'old failed attempt', metadata: { scheduledWork: { runId } },
+    });
+    await createTaskRun({
+      id: activeTaskId, sessionId, status: 'running', workspaceRoot: '/tmp', toolMode: 'read-only',
+      promptPreview: 'active retry attempt', metadata: { scheduledWork: { runId } },
+    });
+
+    const converged = await _convergeOrphanedScheduledRuns('test_active_retry_guard');
+    const run = await loadScheduledWorkItemRun(runId);
+    assert.equal(converged, 0, 'the sweep must not converge a run with an active task');
+    assert.equal(run?.status, 'claimed', 'the active retry run must be left alone');
+  } finally {
+    await db.query('DELETE FROM scheduled_work_item_runs WHERE id=$1', [runId]).catch(() => undefined);
+    await db.query('DELETE FROM task_runs WHERE id = ANY($1)', [[oldTaskId, activeTaskId]]).catch(() => undefined);
+    await db.query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]).catch(() => undefined);
+  }
+});
+
+test('orphan sweep respects a claimed retry lease before its task exists', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await assertIsolatedSchema();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runId = `schedule-run-claim-window-${suffix}`;
+  const oldTaskId = `task-old-failed-claim-${suffix}`;
+  const sessionId = `session-claim-window-${suffix}`;
+  const db = getDb();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los',
+    title: `claim-window-${suffix}`,
+    trigger: { kind: 'once', expression: new Date(Date.now() + 3_600_000).toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+  });
+  try {
+    await db.query(
+      `INSERT INTO scheduled_work_item_runs
+         (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts,
+          claim_owner,lease_expires_at)
+       VALUES ($1,$2,now(),'scheduled','claimed',1,2,'retry-owner',now()+interval '5 minutes')`,
+      [runId, schedule.id],
+    );
+    await createTaskRun({
+      id: oldTaskId, sessionId, status: 'failed', workspaceRoot: '/tmp', toolMode: 'read-only',
+      promptPreview: 'old failed attempt before retry task exists',
+      metadata: { scheduledWork: { runId } },
+    });
+
+    const live = await _convergeOrphanedScheduledRuns('test_claim_window_live');
+    assert.equal(live, 0, 'a live retry lease must block convergence');
+    assert.equal((await loadScheduledWorkItemRun(runId))?.status, 'claimed');
+
+    await db.query("UPDATE scheduled_work_item_runs SET lease_expires_at = now() - interval '1 minute' WHERE id=$1", [runId]);
+    const expired = await _convergeOrphanedScheduledRuns('test_claim_window_expired');
+    assert.ok(expired >= 1, 'an expired retry lease must be converged');
+    assert.equal((await loadScheduledWorkItemRun(runId))?.status, 'failed');
+  } finally {
+    await db.query('DELETE FROM scheduled_work_item_runs WHERE id=$1', [runId]).catch(() => undefined);
+    await db.query('DELETE FROM task_runs WHERE id=$1', [oldTaskId]).catch(() => undefined);
+    await db.query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]).catch(() => undefined);
+  }
+});
+
+test('completion-route convergence records the schedule outcome and opens the circuit', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await assertIsolatedSchema();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runId = `schedule-run-route-${suffix}`;
+  const sessionId = `session-route-${suffix}`;
+  const db = getDb();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los',
+    title: `route-convergence-${suffix}`,
+    trigger: { kind: 'once', expression: new Date(Date.now() + 3_600_000).toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1,
+  });
+  let recoveryWorkItemId: string | undefined;
+  try {
+    await db.query(
+      `INSERT INTO scheduled_work_item_runs
+         (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts)
+       VALUES ($1,$2,now(),'scheduled','running',1,2)`,
+      [runId, schedule.id],
+    );
+
+    const status = await _convergeScheduledRunForCompletion(runId, 'failed', 'task failed');
+    assert.equal(status, 'failed');
+    const run = await loadScheduledWorkItemRun(runId);
+    assert.equal(run?.status, 'failed');
+    const updated = await loadScheduledWorkItem(schedule.id);
+    assert.equal(updated?.consecutiveFailures, 1, 'schedule counters must reflect the completion');
+    assert.equal(updated?.circuitState, 'open', 'failureThreshold=1 must open the circuit');
+    recoveryWorkItemId = updated?.recoveryWorkItemId;
+    assert.ok(recoveryWorkItemId, 'circuit open must create a recovery work item');
+  } finally {
+    await db.query('DELETE FROM scheduled_work_item_runs WHERE id=$1', [runId]).catch(() => undefined);
+    if (recoveryWorkItemId) await db.query('DELETE FROM todos WHERE id=$1', [recoveryWorkItemId]).catch(() => undefined);
+    await db.query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]).catch(() => undefined);
+  }
+});

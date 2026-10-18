@@ -72,8 +72,11 @@ default.
    `docs/adr/0050-p4-stateless-executor-fail-closed-semantics.md`; `none` stays
    a canary. Promotion requires the six gates in that ADR, not a wording
    change.
-2. Headless approval usability: blocked vs failed policy, or forbid
-   approval-required tools on stateless scheduled runs.
+2. ~~Headless approval usability: blocked vs failed policy, or forbid
+   approval-required tools on stateless scheduled runs.~~ **Partially resolved
+   2026-10-19 (B2)**: a stateless executor (`EXECUTOR_DB_MODE=none`) now forces
+   approval `block`; interactive/local headless runs remain warn-by-default.
+   See `docs/operations/2026-10-19-b2-approval-and-convergence-hardening.md`.
 3. Provider authority decision (cc-switch / DSH / los / optional Magpie edge).
 4. Artifact GC/quota, Postgres + artifact + losvault backup/restore drills.
 5. Global event sequence/gap detection and provider cost/quota observability.

@@ -210,14 +210,20 @@ async function executeBrokeredTool(
   }
 
   // Approval gate. `needsApproval` is declared by four tools (run_shell,
-  // run_remote_command, run_runtime_task, the background shell) and used to be
-  // serialized into events without a decision point. Warn by default; switch
-  // to block with LOS_TOOL_APPROVAL_ENFORCEMENT=block once the warn events show
-  // nobody relies on the missing channel.
+  // run_remote_command, run_runtime_task, the background shell).
+  //
+  // A stateless executor has no interactive approval channel, so it must block
+  // by construction rather than rely on an env flag: `executionMode=stateless`
+  // (set by the executor from EXECUTOR_DB_MODE=none) wins over everything.
+  // Interactive/local runs keep warn-by-default until the warn events show
+  // nobody relies on the missing channel; LOS_TOOL_APPROVAL_ENFORCEMENT=block
+  // opts them in explicitly.
   if (decision.allowed) {
     const enforcement: ApprovalEnforcement =
-      context.approvalEnforcement
-      ?? (process.env.LOS_TOOL_APPROVAL_ENFORCEMENT === 'block' ? 'block' : 'warn');
+      context.config.executionMode === 'stateless'
+        ? 'block'
+        : context.approvalEnforcement
+          ?? (process.env.LOS_TOOL_APPROVAL_ENFORCEMENT === 'block' ? 'block' : 'warn');
     const gate = evaluateApprovalGate(decision.capability, enforcement);
     if (gate.action !== 'allow') {
       await emitEvent({

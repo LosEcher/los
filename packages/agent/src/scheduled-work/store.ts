@@ -23,7 +23,7 @@ const CLAIMED_ACTIVE_SQL = "('claimed','running','awaiting_approval')";
 
 const LEGAL_TRANSITIONS: Record<ScheduledWorkRunStatus, ScheduledWorkRunStatus[]> = {
   queued: ['claimed', 'skipped', 'cancelled'],
-  claimed: ['running', 'awaiting_approval', 'skipped', 'failed', 'cancelled'],
+  claimed: ['running', 'awaiting_approval', 'skipped', 'succeeded', 'failed', 'cancelled'],
   running: ['claimed', 'succeeded', 'no_op', 'failed', 'cancelled'],
   awaiting_approval: ['claimed', 'queued', 'cancelled'],
   failed: ['claimed'],

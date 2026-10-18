@@ -195,6 +195,7 @@ export function setupAgentRun(
     runContractMetadata: config.runContractMetadata,
     workspaceRoot: config.workspaceRoot,
     parentToolMode: config.toolMode,
+    executionMode: config.executionMode,
     // AP6: inherit parent trace/request/run-spec for cross-agent correlation
     traceId: config.traceId,
     requestId: config.requestId,

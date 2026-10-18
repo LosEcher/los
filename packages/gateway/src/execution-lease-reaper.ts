@@ -2,7 +2,7 @@ import { recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { listAgentTaskAttempts, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { writeDeadLetterEvent, writeDeadLetterForExpiredTasks } from '@los/agent/dead-letter';
 import { appendSessionEvent } from '@los/agent/session-events';
-import { loadScheduledWorkItemRun, transitionScheduledWorkRun } from '@los/agent';
+import { loadScheduledWorkItemRun, recordScheduledRunOutcome, transitionScheduledWorkRun } from '@los/agent';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
@@ -17,20 +17,56 @@ const log = getLogger('gateway');
  */
 export async function _convergeOrphanedScheduledRuns(reason = 'orphaned_task_terminal'): Promise<number> {
   const db = getDb();
-  const rows = await db.query<{ run_id: string; task_id: string; status: string; task_status: string }>(
-    `SELECT r.id AS run_id, t.id AS task_id, r.status, t.status AS task_status
+  const rows = await db.query<{
+    run_id: string;
+    schedule_id: string;
+    task_id: string;
+    status: string;
+    task_status: string;
+    result: Record<string, unknown> | null;
+  }>(
+    `SELECT DISTINCT ON (r.id)
+            r.id AS run_id, r.schedule_id, t.id AS task_id,
+            r.status, t.status AS task_status,
+            t.metadata_json->'completionResult' AS result
        FROM scheduled_work_item_runs r
        JOIN task_runs t
          ON t.metadata_json->'scheduledWork'->>'runId' = r.id
       WHERE r.status IN ('running','claimed')
-        AND t.status IN ('failed','cancelled','blocked')
+        AND t.status IN ('failed','cancelled','blocked','succeeded')
+        AND NOT EXISTS (
+          SELECT 1 FROM task_runs active
+           WHERE active.metadata_json->'scheduledWork'->>'runId' = r.id
+             AND active.status IN ('queued','running')
+        )
+        -- A retry is moved to 'claimed' with a lease before its new task row
+        -- exists. Without this guard the sweep would converge that retry from
+        -- the old failed task. Only an expired/absent lease is orphaned.
+        AND (r.claim_owner IS NULL OR r.lease_expires_at IS NULL OR r.lease_expires_at < now())
+      ORDER BY r.id, t.created_at DESC
       LIMIT 50`,
   );
   let converged = 0;
   for (const row of rows.rows) {
     try {
-      await transitionScheduledWorkRun(row.run_id, 'failed', {
-        error: `task_run ${row.task_id} is ${row.task_status} without scheduled convergence`,
+      const target = row.task_status === 'succeeded' ? 'succeeded' : 'failed';
+      if (target === 'succeeded') {
+        // A succeeded task must converge its scheduled run to succeeded, not
+        // failed. The completion route may have failed to persist this; the
+        // sweep is the independent backstop.
+        await transitionScheduledWorkRun(row.run_id, 'succeeded', {
+          ...(row.result ? { resultSummary: row.result } : {}),
+        });
+      } else {
+        await transitionScheduledWorkRun(row.run_id, 'failed', {
+          error: `task_run ${row.task_id} is ${row.task_status} without scheduled convergence`,
+        });
+      }
+      // Keep schedule-level counters/circuit consistent with a normal runner
+      // outcome. Result-work-item creation still belongs to the runner path;
+      // this backstop does not fabricate a user-visible result.
+      await recordScheduledRunOutcome({ scheduleId: row.schedule_id, status: target }).catch((error) => {
+        log.warn(`Scheduled run ${row.run_id} outcome recording failed: ${String(error)}`);
       });
       converged++;
     } catch (error) {
@@ -69,7 +105,14 @@ export async function reapExpiredExecutionLeases(reason: string): Promise<{
         to: 'blocked',
         sessionId: task.sessionId,
         reason: `task_run ${task.id} recovered as failed: ${reason}`,
-      }).catch(() => undefined);
+      }).catch((error) => {
+        // Do not swallow: the 30-minute stale-running sweep is only a
+        // backstop, and a run_spec left `running` is a visible defect.
+        log.warn(
+          `Reaper could not block run_spec ${task.runSpecId} for task ${task.id}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     }
   }
 

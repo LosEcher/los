@@ -39,11 +39,11 @@ P4 的验收有两条分支：证明任务能跨 gateway 重启存活，或显�
 
 **不是**可接受的结果：静默重试成另一个 task、把 failed 当 succeeded、scheduled run 永久 running、headless 审批被当成已批准、或“gateway 重启后任务继续跑”在没有证据时被写成默认行为。
 
-**三个已登记、尚未关闭的缺口**（不要在本 ADR 里写成已完成）：
+**三个已登记缺口（B2 已关闭，保留记录）**：
 
-1. **审批默认是 warn，不是 fail-closed**：`tool.approval_required` 是记录，不是拒绝；只有 `block` 才拒绝。把 stateless/headless 任务当成“审批已 fail-closed”是假绿。
-2. **succeeded + stuck scheduled run**：显式完成吞掉 convergence 异常；orphan sweep 只扫 failed/cancelled/blocked。succeeded 任务的 linked scheduled run 可能永久 running。
-3. **run_spec block 异常被吞**：reaper 的 `transitionExecutionState` 失败只被 `.catch(() => undefined)` 吞掉，30 分钟 stale sweep 只是兜底，不是保证。
+1. **（B2 前）审批默认是 warn，不是 fail-closed**：`tool.approval_required` 是记录，不是拒绝；只有 `block` 才拒绝。**Closed 2026-10-19 (B2)**：stateless executor 由 `executionMode=stateless` 强制 `block`，handler 不运行；interactive/local 与 remote DB-mode executor 仍是 warn-by-default（后者也 headless，但本轮未改）。见 `docs/operations/2026-10-19-b2-approval-and-convergence-hardening.md`。
+2. **（B2 前）succeeded + stuck scheduled run**：显式完成吞掉 convergence 异常；orphan sweep 只扫 failed/cancelled/blocked。**Closed 2026-10-19 (B2)**：sweep 覆盖 succeeded/claimed、加 active-task 与 run-lease 守卫、latest-attempt 选择，按 task 终态收敛到 succeeded/failed 并记录 schedule outcome；completion 失败返回 `scheduledConvergencePending`。completion route 也在 run transition 后记录 schedule outcome 并创建 circuit-open recovery work item；succeeded result work item 仍由正常 runner 创建（backstop 不伪造结果）。见同一 evidence doc。
+3. **（B2 前）run_spec block 异常被吞**：reaper 的 `transitionExecutionState` 失败只被 `.catch(() => undefined)` 吞掉。**Closed 2026-10-19 (B2)**：失败现在写 `log.warn`，30 分钟 stale sweep 仍是兜底但不再静默。
 
 ### 2. `none` 保持 canary，不是远端默认
 
@@ -61,7 +61,7 @@ P4 的验收有两条分支：证明任务能跨 gateway 重启存活，或显�
 3. **事件缺口可检测**：event sink 有全局序列/缺口检测；health 暴露 `eventBacklog`/`spoolBacklog` 之外的可判定缺口计数（**20 次重启演练中缺口计数为 0**，或缺口能被明确归因并补回）。
 4. **恰好一次收敛**：重启/重试下 task、scheduled run、run_spec 的终态只写一次；旧 lease/旧 token 的写回被拒绝；扩展到 succeeded 的 orphan sweep 并覆盖 convergence 异常。
 5. **部署门禁覆盖全 fleet**：所有节点显式声明 `EXECUTOR_DB_MODE`，`deploy-to-remote.sh preflight/verify/mode` 全绿，回滚演练通过。
-6. **headless/stateless 审批已强制**：`LOS_TOOL_APPROVAL_ENFORCEMENT=block`（或在 stateless scheduled run 上禁止 `needsApproval` 工具）有测试与部署断言；`tool.approval_required` 不再只是 warn。
+6. **headless/stateless 审批已强制**：stateless executor 由 `executionMode=stateless` 强制 `block`（已实现并有测试）；仍需部署断言，确保 `EXECUTOR_DB_MODE=none` 的节点实际运行该版本。
 
 达到**全部六条**后，由新的 ADR 取代本 ADR；不得只改文档措辞。
 
