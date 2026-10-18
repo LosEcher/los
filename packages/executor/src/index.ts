@@ -209,7 +209,7 @@ export async function startExecutor() {
       }
     }
     const folders = await resolveFileSyncFolders();
-    const response = await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource);
+    const response = await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource, !dbDisabled);
     maybeRotateNodeCredential(response);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
@@ -324,6 +324,7 @@ export async function startExecutor() {
         agentKey,
         nodeCredential,
         versionSource,
+        !dbDisabled,
       );
     },
   });
