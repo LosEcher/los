@@ -13,6 +13,11 @@ const CREDENTIAL_EXPIRY_WARNING_MS = 7 * 24 * 60 * 60_000;
 /** nodeId → 最近一次告警日期（UTC day）。心跳 30s 一次，逐次 WARN 会把日志变成噪声。 */
 const credentialWarnings = new Map<string, string>();
 
+export function credentialRotationDue(expiresAt: string, now = Date.now()): boolean {
+  const remainingMs = new Date(expiresAt).getTime() - now;
+  return Number.isFinite(remainingMs) && remainingMs > 0 && remainingMs <= CREDENTIAL_EXPIRY_WARNING_MS;
+}
+
 /**
  * 凭据到期告警文本。`undefined` 表示还早（或已过期——过期凭据在验证层就被拒了，
  * 不该再由告警文案冒充"已通过"）。用剩余天数而不是裸时间戳：值班的人读得出紧迫性
@@ -23,10 +28,8 @@ export function _credentialExpiryWarning(
   expiresAt: string,
   now = Date.now(),
 ): string | undefined {
+  if (!credentialRotationDue(expiresAt, now)) return undefined;
   const remainingMs = new Date(expiresAt).getTime() - now;
-  if (!Number.isFinite(remainingMs) || remainingMs <= 0 || remainingMs > CREDENTIAL_EXPIRY_WARNING_MS) {
-    return undefined;
-  }
   const days = Math.ceil(remainingMs / (24 * 60 * 60_000));
   return `node credential for ${nodeId} expires in ${days}d (${expiresAt}) — re-enroll before expiry`;
 }

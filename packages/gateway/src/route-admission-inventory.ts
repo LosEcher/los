@@ -207,6 +207,7 @@ export function admissionRouteKeys(): readonly string[] {
     'POST /nodes/:id/commands',
     'POST /nodes/:id/probe',
     'POST /nodes/:id/ssh-run',
+    'POST /nodes/credential/rotate',
     'POST /nodes/enroll',
     'POST /nodes/enrollment-tokens',
     'POST /nodes/heartbeat',

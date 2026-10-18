@@ -97,6 +97,36 @@ test('heartbeat omits the per-node credential when the node is not enrolled yet'
   assert.equal(headers.authorization, 'Bearer heartbeat-key');
 });
 
+test('heartbeat returns the gateway credential hints, and tolerates an empty body', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      ok: true,
+      credentialExpiresAt: '2026-11-17T00:00:00.000Z',
+      credentialRotationDue: true,
+    }), { status: 200 })) as typeof fetch;
+    assert.deepEqual(await heartbeatNode(
+      'heartbeat-credential-hints',
+      'http://127.0.0.1:18099', 'v', 'executor', ['agent_http'], fakeLifecycle,
+      'http://127.0.0.1:18099', undefined, 'heartbeat-key', 'node-credential-abc',
+    ), {
+      ok: true,
+      credentialExpiresAt: '2026-11-17T00:00:00.000Z',
+      credentialRotationDue: true,
+    });
+
+    // Older gateways / empty responses must not turn a successful heartbeat into a failure.
+    globalThis.fetch = (async () => new Response('', { status: 200 })) as typeof fetch;
+    assert.deepEqual(await heartbeatNode(
+      'heartbeat-empty-body',
+      'http://127.0.0.1:18099', 'v', 'executor', ['agent_http'], fakeLifecycle,
+      'http://127.0.0.1:18099', undefined, 'heartbeat-key', 'node-credential-abc',
+    ), {});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // ── Control-plane §1: version provenance on the heartbeat ───────────────────
 
 test('NEGATIVE CONTROL: a node without LOS_VERSION reports package_json, not a content hash', () => {

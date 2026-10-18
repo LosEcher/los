@@ -24,7 +24,8 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { _renewTaskLease } from './lease-fencing.js';
-import { heartbeatNode, resolveNodeVersion } from './executor-heartbeat.js';
+import { heartbeatNode, resolveNodeVersion, type HeartbeatResponse } from './executor-heartbeat.js';
+import { loadNodeCredential, rotateNodeCredentialViaGateway, saveNodeCredential } from './node-credential.js';
 import { createHeartbeatReporter } from './executor-heartbeat-reporter.js';
 import { ExecutorRuntimeLifecycle, shutdownExecutor } from './runtime-lifecycle.js';
 import {
@@ -115,7 +116,12 @@ export async function startExecutor() {
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId, config.executor.artifactRoot);
   // Per-node credential (ADR 0048 B3). Absent until the node is enrolled; the gateway
   // verifies it when present and still accepts heartbeats without it.
-  const nodeCredential = config.executor.nodeCredential;
+  // 状态文件优先：轮换过的新值落在这里（`.los-runtime/executor/`，0600），
+  // 不能只靠 .env —— 否则重启会退回旧值，而旧值可能已经过了重叠窗口。
+  let nodeCredential = loadNodeCredential(nodeId, config.executor.nodeCredential);
+  let rotationInFlight = false;
+  /** 轮换成功但落盘失败的新值；下一次心跳先补写。 */
+  let pendingCredentialPersist: { credential: string; expiresAt?: string } | undefined;
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
   const fileSyncStore = createFileSyncStore();
 
@@ -137,9 +143,49 @@ export async function startExecutor() {
     }
   };
 
+  /**
+   * 网关说"该换钥匙了"就自助轮换一次。失败不抛：旧凭据还有重叠窗口，
+   * 下一轮心跳会再试（心跳是最便宜的重试时钟）。
+   */
+  const maybeRotateNodeCredential = (response: HeartbeatResponse): void => {
+    if (!gatewayUrl || !nodeCredential || !response.credentialRotationDue || rotationInFlight) return;
+    rotationInFlight = true;
+    const current = nodeCredential;
+    void rotateNodeCredentialViaGateway({ gatewayUrl, nodeId, credential: current })
+      .then((rotated) => {
+        if (!rotated) {
+          log.warn('node credential rotation failed; keeping current credential (overlap window still open)');
+          return;
+        }
+        nodeCredential = rotated.credential;
+        if (rotated.persisted) {
+          log.info(`node credential rotated (expires ${rotated.expiresAt ?? 'unknown'})`);
+        } else {
+          pendingCredentialPersist = { credential: rotated.credential, ...(rotated.expiresAt ? { expiresAt: rotated.expiresAt } : {}) };
+          log.warn('node credential rotated in memory but could not be persisted; will retry on next heartbeat');
+        }
+      })
+      .catch((err: unknown) => {
+        log.warn(`node credential rotation error: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => {
+        rotationInFlight = false;
+      });
+  };
+
   const reportHeartbeat = createHeartbeatReporter(async () => {
+    if (pendingCredentialPersist) {
+      try {
+        saveNodeCredential(nodeId, pendingCredentialPersist.credential, pendingCredentialPersist.expiresAt);
+        pendingCredentialPersist = undefined;
+        log.info('node credential persisted after earlier write failure');
+      } catch {
+        // 继续用内存里的新值；下一轮再试。
+      }
+    }
     const folders = await resolveFileSyncFolders();
-    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource);
+    const response = await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource);
+    maybeRotateNodeCredential(response);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
   // Self-scheduling heartbeat: fires immediately, then waits
@@ -230,19 +276,21 @@ export async function startExecutor() {
     shutdownGraceMs,
     stopHeartbeat: () => clearTimeout(heartbeatTimer),
     stopPeriodicSync,
-    writeHeartbeat: async () => heartbeatNode(
-      nodeId,
-      publicUrl,
-      version,
-      nodeKind,
-      connectModes,
-      lifecycle,
-      gatewayUrl,
-      await resolveFileSyncFolders(),
-      agentKey,
-      nodeCredential,
-      versionSource,
-    ),
+    writeHeartbeat: async () => {
+      await heartbeatNode(
+        nodeId,
+        publicUrl,
+        version,
+        nodeKind,
+        connectModes,
+        lifecycle,
+        gatewayUrl,
+        await resolveFileSyncFolders(),
+        agentKey,
+        nodeCredential,
+        versionSource,
+      );
+    },
   });
 
   return { server, lifecycle, shutdown };

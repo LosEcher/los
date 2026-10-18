@@ -47,6 +47,11 @@ export function resolveNodeVersion(inputs: {
   return { version: 'unknown', versionSource: 'unversioned' };
 }
 
+export interface HeartbeatResponse {
+  credentialExpiresAt?: string;
+  credentialRotationDue?: boolean;
+}
+
 export async function heartbeatNode(
   nodeId: string,
   baseUrl: string,
@@ -71,7 +76,7 @@ export async function heartbeatNode(
    * "no `+b`" can be counted as `unpinned` rather than as drift.
    */
   versionSource: NodeVersionSource = 'unversioned',
-): Promise<void> {
+): Promise<HeartbeatResponse> {
   const capabilities: Record<string, unknown> = {
     run_agent: lifecycle.acceptingTasks,
     stream_ndjson: true,
@@ -144,8 +149,16 @@ export async function heartbeatNode(
     if (!res.ok) {
       throw new Error(`gateway heartbeat returned ${res.status}: ${await res.text()}`);
     }
+    // 响应带凭据到期信息（rotation due 时 executor 自助换钥）。空 body / 旧网关
+    // 不得让心跳失败：解析失败就当作没有附加信息。
+    try {
+      return (await res.json()) as HeartbeatResponse;
+    } catch {
+      return {};
+    }
   } else {
     const { upsertExecutorNodeHeartbeat } = await import('@los/agent');
     await upsertExecutorNodeHeartbeat(payload);
+    return {};
   }
 }
