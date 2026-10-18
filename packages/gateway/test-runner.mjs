@@ -52,6 +52,8 @@ const sharedProcessTestFiles = [
   'src/ssh-config-import.test.ts',
   'src/ssh-command-runner.test.ts',
   'src/task-dead-letter-routes.test.ts',
+  'src/task-token-routes.test.ts',
+  'src/task-token.test.ts',
   'src/tool-call-upsert.test.ts',
   'src/tool-gate-routes.test.ts',
   'src/unirun-capabilities.test.ts',
@@ -98,6 +100,7 @@ const isolatedDatabaseTestFiles = [
   'src/scenario-economics-routes.test.ts',
   'src/server-maintenance.test.ts',
   'src/session-routes.test.ts',
+  'src/task-token-heartbeat-db.test.ts',
   'src/trace-routes.test.ts',
   'src/trace-incremental.test.ts',
 ];

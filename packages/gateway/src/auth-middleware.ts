@@ -105,6 +105,12 @@ export default async function authMiddleware(
       return reply.code(401).send({ error: 'executor heartbeat authentication required' });
     }
 
+    // Task-token-authenticated endpoint (C.2): the handler verifies
+    // `x-los-task-token` itself and must do so with auth both on and off.
+    // Skip only the generic auth chain here — never the handler's own check,
+    // which is the single source of truth for expiry/scope (no shared-key fallback).
+    if (_isTaskHeartbeatPath(req.url, req.method)) return;
+
     // Executor model route (2026-10-11): an executor may reach the OpenAI-compatible
     // surface with the key it **already has** for the dispatch channel, so a remote
     // node needs no provider credential of its own — the gateway holds them and
@@ -247,6 +253,18 @@ function isPublicPath(url: string | undefined, method: string): boolean {
 function isExecutorHeartbeatPath(url: string | undefined, method: string): boolean {
   if (method !== 'POST' || !url) return false;
   return (url.split('?')[0] || url) === '/nodes/heartbeat';
+}
+
+/**
+ * `POST /tasks/:id/heartbeat` — 任务令牌自证端点。
+ *
+ * 与 `/nodes/heartbeat` 的区别：那条用**共享** agent key，这条用**单个 task run** 的
+ * 短时令牌，且验证发生在 handler（`task-routes.ts`）而不是中间件——因为中间件跑在
+ * body/params 解析之前，拿不到 `:id` 与令牌 claim 做绑定比对。
+ */
+export function _isTaskHeartbeatPath(url: string | undefined, method: string): boolean {
+  if (method !== 'POST' || !url) return false;
+  return /^\/tasks\/[^/]+\/heartbeat$/.test(url.split('?')[0] || url);
 }
 
 /**

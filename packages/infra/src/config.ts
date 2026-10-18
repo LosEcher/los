@@ -254,6 +254,14 @@ export const ConfigSchema = z.object({
     version: z.string().trim().min(1).optional(),
     agentKey: z.string().optional(),
     /**
+     * 任务级短时令牌的 HMAC 密钥（C.2 第一步）。
+     *
+     * 只由网关读写：`POST /tasks/:id/token` 用它签，`POST /tasks/:id/heartbeat` 用它验。
+     * **不设即拒绝签发**（返回 503），刻意不回退到 `agentKey`——否则共享密钥又变成
+     * 一条可签发任务令牌的路径，per-task 边界就名存实亡。
+     */
+    taskTokenSecret: z.string().optional(),
+    /**
      * Per-node credential issued by `POST /nodes/enroll` (redeemed from a one-time
      * enrollment token). Sent as `x-los-node-credential` on the node heartbeat so the
      * gateway can attribute the row to this node instead of relying on the shared

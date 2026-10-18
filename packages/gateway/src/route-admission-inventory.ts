@@ -260,6 +260,8 @@ export function admissionRouteKeys(): readonly string[] {
     'POST /skills/load-from-dir',
     'POST /skills/sync-to-dir',
     'POST /tasks/:id/cancel',
+    'POST /tasks/:id/heartbeat',
+    'POST /tasks/:id/token',
     'POST /tasks/dead-letter/:id/ack',
     'POST /tasks/dead-letter/:id/retry',
     'POST /tenants/:tenantId/projects/:projectId/todos/dispatch',

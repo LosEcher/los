@@ -44,6 +44,7 @@ const ENV_MAP: [string, string][] = [
   ['LOS_CODE_GRAPH_INJECT_ARCH', 'memory.codeGraph.injectArchitecture'],
   ['LOS_CBM_COMMAND', 'memory.codeGraph.cbmCommand'], ['EXECUTOR_ENABLED', 'executor.enabled'],
   ['EXECUTOR_VERSION', 'executor.version'], ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
+  ['LOS_TASK_TOKEN_SECRET', 'executor.taskTokenSecret'],
   ['EXECUTOR_NODE_CREDENTIAL', 'executor.nodeCredential'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'], ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
   ['EXECUTOR_NODE_KIND', 'executor.nodeKind'], ['EXECUTOR_HOST', 'executor.host'],

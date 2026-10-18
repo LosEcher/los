@@ -83,6 +83,11 @@ export const SELF_AUTHENTICATED_PATHS = new Map([
     'POST /nodes/enroll',
     '一次性 enrollment token 兑换（token 自证，见 file:packages/gateway/src/routes/infrastructure/node-routes.ts:109）。',
   ],
+  [
+    'POST /tasks/:id/heartbeat',
+    '`x-los-task-token`（HMAC，绑定 taskRunId + leaseVersion + exp，见 file:packages/gateway/src/task-token.ts）。' +
+      '自证且 fail-closed：验不过即 401，普通已认证主体也进不来。',
+  ],
 ]);
 
 // ── 纯函数区（可被 --self-test 直接覆盖，不碰文件系统）────────────────────

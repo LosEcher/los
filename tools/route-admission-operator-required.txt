@@ -95,6 +95,7 @@ POST /scheduled-work-items/:id/trigger
 POST /services/:id/drain
 POST /services/:id/promote
 POST /sessions/:id/operator-events
+POST /tasks/:id/token
 POST /tasks/dead-letter/:id/ack
 POST /tasks/dead-letter/:id/retry
 POST /tenants/:tenantId/projects/:projectId/todos/dispatch
