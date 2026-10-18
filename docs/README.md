@@ -121,6 +121,12 @@ replaced it, the real-call outcomes wired into scoring, the executor's two compe
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
 
+Use `operations/2026-10-18-executor-db-mode-deployment-contract.md` for the
+`EXECUTOR_DB_MODE` deployment contract: the acceptance criteria written before
+the change, the mode-aware preflight/verify gates in `deploy-to-remote.sh`, the
+`.env`/spool/credential ownership rules, node34 live evidence, and the
+negative-control matrix (a `none` node with `DATABASE_URL` must fail, not warn).
+
 Use `architecture/2026-10-11-cross-platform-content-identity-design.md` for why the
 deployable-content digest is a single Node implementation that bash and PowerShell
 both call (rather than a bash pipeline plus a PowerShell copy), what it covers and
