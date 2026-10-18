@@ -86,19 +86,30 @@ export async function startExecutor() {
   const shutdownGraceMs = config.executor.shutdownGraceMs;
   const lifecycle = new ExecutorRuntimeLifecycle();
 
-  await initDb(config.databaseUrl);
+  const dbDisabled = config.executor.dbMode === 'none';
+  if (dbDisabled) {
+    if (!gatewayUrl) throw new Error('EXECUTOR_DB_MODE=none requires GATEWAY_URL');
+    if (taskTokenMode !== 'required') {
+      throw new Error('EXECUTOR_DB_MODE=none requires EXECUTOR_TASK_TOKEN_MODE=required');
+    }
+    log.info('EXECUTOR_DB_MODE=none: skipping DB bootstrap, migrations, agent stores, and file-sync');
+  } else {
+    await initDb(config.databaseUrl);
+  }
 
   // Run ordered migrations before ensureAllStores. Executor nodes (especially
   // remote ones with their own DB) must not rely on the gateway's
   // ensureAllStores — file_sync_* tables have no ensure*Store, so migration is
   // their only source. Idempotent; mirrors gateway startup. See
   // packages/gateway/src/server.ts and docs/architecture/2026-06-28-self-iteration-engineering.md.
-  const migrateResult = await migrateDir(getMigrateDir(config), getDb());
-  if (migrateResult.applied.length > 0) {
-    log.info(`Executor migrations applied: ${migrateResult.applied.join(', ')}`);
-  }
-  if (migrateResult.errors.length > 0) {
-    log.warn(`Executor migration errors: ${migrateResult.errors.join('; ')}`);
+  if (!dbDisabled) {
+    const migrateResult = await migrateDir(getMigrateDir(config), getDb());
+    if (migrateResult.applied.length > 0) {
+      log.info(`Executor migrations applied: ${migrateResult.applied.join(', ')}`);
+    }
+    if (migrateResult.errors.length > 0) {
+      log.warn(`Executor migration errors: ${migrateResult.errors.join('; ')}`);
+    }
   }
 
   // ensureAllAgentStores covers ALL agent-owned tables (27 stores).
@@ -107,7 +118,7 @@ export async function startExecutor() {
   // 24 tables missing. Now remote nodes have a full schema just like the
   // gateway, which is necessary because runAgent() touches run_specs,
   // session_events, tool_call_states, verification_records, etc.
-  await ensureAllAgentStores();
+  if (!dbDisabled) await ensureAllAgentStores();
 
   const nodeId = config.executor.nodeId ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;
@@ -142,6 +153,7 @@ export async function startExecutor() {
 
   // Resolve active file-sync folders for heartbeat capability reporting
   const resolveFileSyncFolders = async () => {
+    if (dbDisabled) return [];
     try {
       const folders = await fileSyncStore.listFolders(nodeId);
       return folders
@@ -225,6 +237,7 @@ export async function startExecutor() {
           acceptingTasks: lifecycle.acceptingTasks,
           activeTaskCount: lifecycle.activeTaskCount,
           taskTokenMode,
+          db: dbDisabled ? 'none' : 'postgres',
           leaseTransport: gatewayUrl ? 'http-when-token' : 'db',
         });
         return;
@@ -232,6 +245,7 @@ export async function startExecutor() {
 
       if (route.pathname.startsWith('/v1/artifacts')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+        if (dbDisabled) { sendJson(res, 503, { error: 'artifact_store_unavailable_in_stateless_mode' }); return; }
         await handleArtifactRoute(req, res, route, nodeId, artifactStorageRoot);
         return;
       }
@@ -265,12 +279,14 @@ export async function startExecutor() {
 
       if (route.pathname.startsWith('/v1/file-sync')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+        if (dbDisabled) { sendJson(res, 503, { error: 'file_sync_unavailable_in_stateless_mode' }); return; }
         await handleFileSyncRoute(req, res, route, nodeId, readJson, normalizeOptionalString, normalizePositiveInteger, sendJson);
         return;
       }
 
       sendJson(res, 404, { error: 'not found' });
     } catch (err: any) {
+      log.error(err?.stack ?? String(err));
       sendJson(res, 500, { error: err?.message ?? String(err) });
     }
   });
@@ -279,7 +295,7 @@ export async function startExecutor() {
   log.info(`Executor node ${nodeId} listening on ${publicUrl}`);
 
   // Start periodic file-sync scanning for folders registered on this node
-  const stopPeriodicSync = startPeriodicSync(nodeId);
+  const stopPeriodicSync = dbDisabled ? (() => {}) : startPeriodicSync(nodeId);
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => shutdownPromise ??= shutdownExecutor({
     server,

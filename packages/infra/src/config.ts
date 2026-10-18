@@ -278,6 +278,13 @@ export const ConfigSchema = z.object({
      */
     taskTokenMode: z.enum(['auto', 'required', 'off']).optional(),
     /**
+     * `none` runs a stateless executor: no initDb/migrations/store bootstrap and
+     * no direct-DB artifact/file-sync endpoints. Task and agent leases must use
+     * the gateway HTTP path, so GATEWAY_URL + EXECUTOR_TASK_TOKEN_MODE=required
+     * are mandatory in this mode.
+     */
+    dbMode: z.enum(['required', 'none']).optional(),
+    /**
      * Per-node credential issued by `POST /nodes/enroll` (redeemed from a one-time
      * enrollment token). Sent as `x-los-node-credential` on the node heartbeat so the
      * gateway can attribute the row to this node instead of relying on the shared

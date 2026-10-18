@@ -47,6 +47,7 @@ const ENV_MAP: [string, string][] = [
   ['LOS_TASK_TOKEN_SECRET', 'executor.taskTokenSecret'],
   ['LOS_TASK_TOKEN_SECRET_PREVIOUS', 'executor.taskTokenSecretPrevious'],
   ['EXECUTOR_TASK_TOKEN_MODE', 'executor.taskTokenMode'],
+  ['EXECUTOR_DB_MODE', 'executor.dbMode'],
   ['EXECUTOR_NODE_CREDENTIAL', 'executor.nodeCredential'],
   ['EXECUTOR_NODE_CREDENTIAL_TTL_DAYS', 'executor.nodeCredentialTtlDays'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'], ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
