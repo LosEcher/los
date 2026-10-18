@@ -79,6 +79,18 @@ export function registerNodeCommandRoutes(app: FastifyInstance, options: NodeCom
       reason: normalizeOptionalString(body?.reason),
       args: normalizeJsonObject(body?.args),
     };
+    // Promote/drain are control-plane registry writes. Do not forward them to
+    // the executor: a stateless node (EXECUTOR_DB_MODE=none) has no getDb()
+    // and its command endpoint returns 500 "Database not initialized".
+    if (command === 'status' || command === 'promote' || command === 'drain') {
+      const record = await executeNodeCommand(commandInput);
+      const statusCode = record.status === 'failed' ? 500 : record.status === 'denied' ? 409 : 202;
+      return reply.status(statusCode).send({
+        ok: record.status !== 'failed' && record.status !== 'denied',
+        command: record,
+      });
+    }
+
     const proxied = await proxyNodeCommand(commandInput, options.executorAgentKey);
     if (proxied) return reply.status(proxied.statusCode).send(proxied.body);
 

@@ -168,6 +168,9 @@ rolloutState=idle
 ```
 
 **Finding: `deploy-to-remote.sh promote` cannot be used on a stateless node.**
+**Fixed 2026-10-19** in
+`docs/operations/2026-10-19-stateless-promote-fix.md` (gateway-side
+promote/drain). The text below is the state observed during this rollout.
 The command path forwards `promote` to the executor's
 `/v1/nodes/<id>/commands`, and that handler calls `getDb()`; with
 `EXECUTOR_DB_MODE=none` the executor has no DB and returns

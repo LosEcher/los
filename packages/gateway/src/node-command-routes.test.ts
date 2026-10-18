@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
-import { upsertExecutorNode } from '@los/agent/executor-nodes';
+import { loadExecutorNode, upsertExecutorNode } from '@los/agent/executor-nodes';
 import { registerRequestContext } from './request-context.js';
 import { registerNodeCommandRoutes } from './routes/orchestration/node-command-routes.js';
 
@@ -155,18 +155,72 @@ test('node command routes proxy to advertised executor command url', async () =>
     const response = await gateway.inject({
       method: 'POST',
       url: `/nodes/${nodeId}/commands`,
-      payload: { command: 'status', reason: 'proxy test' },
+      payload: { command: 'probe', reason: 'proxy test' },
     });
     assert.equal(response.statusCode, 202);
     assert.equal(response.json().command.output.source, 'executor-proxy');
     assert.equal(authorization, 'Bearer proxy-key');
     assert.equal(proxiedBody.nodeId, nodeId);
-    assert.equal(proxiedBody.command, 'status');
+    assert.equal(proxiedBody.command, 'probe');
     assert.equal(proxiedBody.reason, 'proxy test');
   } finally {
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
     await gateway.close();
     await executor.close();
+  }
+});
+
+test('stateless promote is a gateway registry write, not an executor proxy', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const nodeId = `test-node-stateless-promote-${Date.now()}`;
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerNodeCommandRoutes(app, { executorAgentKey: 'unused-key' });
+
+  try {
+    await upsertExecutorNode({
+      nodeId,
+      nodeKind: 'executor',
+      status: 'draining',
+      version: '0.1.0+b191b9d28dac2',
+      connectModes: ['agent_http'],
+      connectConfig: {
+        agent_http: {
+          // A stateless executor advertises this URL, but its handler requires
+          // getDb(); the gateway must never call it for promote.
+          commandUrl: `http://127.0.0.1:1/v1/nodes/${nodeId}/commands`,
+        },
+      },
+      capabilities: { run_agent: true },
+      verified: { agent_http: { ok: true } },
+    });
+
+    const status = await app.inject({
+      method: 'POST',
+      url: `/nodes/${nodeId}/commands`,
+      payload: { command: 'status' },
+    });
+    assert.equal(status.statusCode, 202);
+    assert.equal(status.json().command.output.node.status, 'draining');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/nodes/${nodeId}/commands`,
+      payload: { command: 'promote', reason: 'stateless promote test' },
+    });
+    assert.equal(response.statusCode, 202);
+    const data = response.json();
+    assert.equal(data.command.status, 'succeeded');
+    assert.equal(data.command.output.node.status, 'online');
+    assert.equal(data.command.output.node.rolloutState, 'idle');
+    assert.equal((await loadExecutorNode(nodeId))?.status, 'online');
+  } finally {
+    await getDb().query('DELETE FROM node_commands WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await app.close();
   }
 });
