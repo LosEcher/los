@@ -178,8 +178,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     input = { ...input, allowedTools: effectiveAllowedTools };
   }
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
-  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
-  const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));
+  // Gateway restarts can exceed 30s. Keep a restart budget so a healthy
+  // remote task is not reaped merely because the control plane bounced.
+  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 300_000;
+  const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? 60_000;
   const leaseVersion = normalizePositiveInteger(input.leaseVersion) ?? 1;
   const providerFallback = normalizeProviderFallbackPolicy(input.providerFallback);
   const initialFallbackTarget = resolveProviderFallbackInitialTarget(providerFallback, {
