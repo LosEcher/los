@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { getDb } from '@los/infra/db';
 import { claimReadyAgentTasks, createAgentTask, createTaskRun } from '@los/agent';
-import { _renewTaskLease } from './lease-fencing.js';
+import { _renewAgentTaskLease, _renewTaskLease } from './lease-fencing.js';
 
 test('remote executor aborts when the agent-task fence is lost', async () => {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -120,4 +120,41 @@ test('HTTP 409 aborts with lease_lost', async () => {
 
   assert.equal(controller.signal.aborted, true);
   assert.match(String(controller.signal.reason), /lease_lost/);
+});
+
+
+test('agent task lease heartbeat uses the task-token HTTP endpoint', async () => {
+  let seen: { url: string; token: string | undefined; body: string | undefined } | undefined;
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    seen = {
+      url: String(url),
+      token: headers.get('x-los-task-token') ?? undefined,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    };
+    return new Response('{"ok":true}', { status: 200 });
+  }) as typeof fetch;
+  const result = await _renewAgentTaskLease(
+    'task-1',
+    'node-a',
+    { taskId: 'agent-1', leaseVersion: 2 },
+    30_000,
+    { gatewayUrl: 'http://gateway.local/', taskToken: 'tok-123', fetchImpl },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(seen?.url, 'http://gateway.local/tasks/task-1/agent-tasks/agent-1/heartbeat');
+  assert.equal(seen?.token, 'tok-123');
+  assert.deepEqual(JSON.parse(seen!.body!), { leaseVersion: 2, leaseMs: 30_000 });
+});
+
+test('agent task HTTP 403 is token_scope_mismatch, not a DB fallback', async () => {
+  const fetchImpl = (async () => new Response('{"error":"agent_task_not_bound_to_task_run"}', { status: 403 })) as typeof fetch;
+  const result = await _renewAgentTaskLease(
+    'task-1',
+    'node-a',
+    { taskId: 'agent-other', leaseVersion: 1 },
+    30_000,
+    { gatewayUrl: 'http://gateway.local', taskToken: 'tok-123', fetchImpl },
+  );
+  assert.deepEqual(result, { ok: false, reason: 'token_scope_mismatch' });
 });

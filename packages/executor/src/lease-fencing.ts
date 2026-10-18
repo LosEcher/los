@@ -71,6 +71,42 @@ export async function _renewTaskRunLease(
   throw new Error(`task lease heartbeat failed with ${res.status}`);
 }
 
+export type AgentTaskLeaseRenewal =
+  | { ok: true }
+  | { ok: false; reason: 'token_invalid' | 'token_scope_mismatch' | 'lease_lost' | 'token_not_configured' | 'gateway_url_missing' };
+
+export async function _renewAgentTaskLease(
+  taskRunId: string,
+  nodeId: string,
+  agentTaskLease: { taskId: string; leaseVersion: number },
+  leaseMs: number,
+  http?: TaskLeaseHttpTransport,
+): Promise<AgentTaskLeaseRenewal> {
+  if (!http) {
+    const renewed = await heartbeatAgentTask(agentTaskLease.taskId, {
+      nodeId,
+      leaseVersion: agentTaskLease.leaseVersion,
+      leaseMs,
+    });
+    return renewed ? { ok: true } : { ok: false, reason: 'lease_lost' };
+  }
+  if (!http.gatewayUrl) return { ok: false, reason: 'gateway_url_missing' };
+  const fetchImpl = http.fetchImpl ?? fetch;
+  const url = `${http.gatewayUrl.replace(/\/+$/, '')}/tasks/${encodeURIComponent(taskRunId)}/agent-tasks/${encodeURIComponent(agentTaskLease.taskId)}/heartbeat`;
+  const res = await fetchImpl(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-los-task-token': http.taskToken },
+    body: JSON.stringify({ leaseVersion: agentTaskLease.leaseVersion, leaseMs }),
+    signal: AbortSignal.timeout(http.timeoutMs ?? 10_000),
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 401) return { ok: false, reason: 'token_invalid' };
+  if (res.status === 403) return { ok: false, reason: 'token_scope_mismatch' };
+  if (res.status === 409) return { ok: false, reason: 'lease_lost' };
+  if (res.status === 503) return { ok: false, reason: 'token_not_configured' };
+  throw new Error(`agent task lease heartbeat failed with ${res.status}`);
+}
+
 export async function _renewTaskLease(
   taskRunId: string,
   nodeId: string,
@@ -83,12 +119,8 @@ export async function _renewTaskLease(
   const [taskRunRenewal, renewedAgentTask] = await Promise.all([
     _renewTaskRunLease(taskRunId, nodeId, leaseVersion, leaseMs, http),
     agentTaskLease
-      ? heartbeatAgentTask(agentTaskLease.taskId, {
-          nodeId,
-          leaseVersion: agentTaskLease.leaseVersion,
-          leaseMs,
-        })
-      : Promise.resolve(true),
+      ? _renewAgentTaskLease(taskRunId, nodeId, agentTaskLease, leaseMs, http)
+      : Promise.resolve({ ok: true as const }),
   ]);
 
   if (taskRunRenewal.ok && taskRunRenewal.taskToken && http) {
@@ -110,7 +142,7 @@ export async function _renewTaskLease(
     return;
   }
 
-  if (!renewedAgentTask && !controller.signal.aborted) {
-    controller.abort(createAbortError('lease_lost'));
+  if (!renewedAgentTask.ok && !controller.signal.aborted) {
+    controller.abort(createAbortError('agent_task_lease_lost'));
   }
 }

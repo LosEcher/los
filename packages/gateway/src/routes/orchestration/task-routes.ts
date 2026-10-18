@@ -5,6 +5,8 @@ import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
+import { heartbeatAgentTask } from '@los/agent/agent-task-graph';
+import { listAgentTaskAttempts } from '@los/agent/agent-task-graph';
 import { normalizeOptionalString, parseBoundedIntegerParam } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
@@ -21,6 +23,8 @@ export type TaskRouteDependencies = {
   appendSessionEvent: typeof appendSessionEvent;
   cancelScheduledTask: typeof cancelScheduledTask;
   heartbeatTaskRun: typeof heartbeatTaskRun;
+  heartbeatAgentTask: typeof heartbeatAgentTask;
+  listAgentTaskAttempts: typeof listAgentTaskAttempts;
   listDeadLetterEvents: typeof listDeadLetterEvents;
   listServiceInstances: typeof listServiceInstances;
   listTaskRuns: typeof listTaskRuns;
@@ -42,6 +46,8 @@ const defaultDependencies: TaskRouteDependencies = {
   appendSessionEvent,
   cancelScheduledTask,
   heartbeatTaskRun,
+  heartbeatAgentTask,
+  listAgentTaskAttempts,
   listDeadLetterEvents,
   listServiceInstances,
   listTaskRuns,
@@ -265,6 +271,61 @@ export function registerTaskRoutes(
             taskTokenExpiresAt: taskTokenExpiresAtIso(refreshed.claims.expiresAt),
           }
         : {}),
+    };
+  });
+
+  /**
+   * Agent-task lease renewal over HTTP. It stays on the short-lived task token
+   * (path taskRunId must match the token), then checks that the agent task has
+   * a running attempt for that task run. nodeId and leaseVersion are never
+   * trusted from the body for placement.
+   */
+  app.post('/tasks/:id/agent-tasks/:agentTaskId/heartbeat', async (req, reply) => {
+    const { id, agentTaskId } = req.params as { id: string; agentTaskId: string };
+    const currentSecret = deps.taskTokenSecret();
+    const secrets = deps.taskTokenSecrets?.() ?? (currentSecret ? [currentSecret] : []);
+    if (secrets.length === 0) {
+      return reply.status(503).send({ error: 'task_token_secret_not_configured' });
+    }
+    const rawToken = req.headers['x-los-task-token'];
+    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+    const verified = secrets.length === 1
+      ? verifyTaskToken(token, secrets[0])
+      : verifyTaskTokenWithRotation(token, secrets);
+    if (!verified.ok) return reply.status(401).send({ error: 'invalid_task_token', reason: verified.reason });
+    if (verified.claims.taskRunId !== id) return reply.status(403).send({ error: 'task_token_scope_mismatch' });
+
+    const body = req.body as { leaseVersion?: unknown; leaseMs?: unknown } | undefined;
+    if (typeof body?.leaseVersion !== 'number' || !Number.isSafeInteger(body.leaseVersion) || body.leaseVersion < 1) {
+      return reply.status(400).send({ error: 'leaseVersion must be a positive integer' });
+    }
+    const leaseMs = normalizeLeaseMsRequest(body?.leaseMs);
+    if (leaseMs === 'invalid') {
+      return reply.status(400).send({ error: 'leaseMs must be an integer between 1000 and 600000' });
+    }
+
+    await deps.ensureTaskRunStore();
+    const taskRun = await deps.loadTaskRun(id);
+    if (!taskRun) return reply.status(404).send({ error: 'Not found' });
+    if (!taskRun.nodeId) return reply.status(409).send({ error: 'task_has_no_node', taskRunId: taskRun.id });
+
+    const attempts = await deps.listAgentTaskAttempts(agentTaskId);
+    const bound = attempts.some(attempt => attempt.taskRunId === id && attempt.status === 'running');
+    if (!bound) return reply.status(403).send({ error: 'agent_task_not_bound_to_task_run', agentTaskId, taskRunId: id });
+
+    const renewed = await deps.heartbeatAgentTask(agentTaskId, {
+      nodeId: taskRun.nodeId,
+      leaseVersion: body.leaseVersion,
+      ...(leaseMs === undefined ? {} : { leaseMs }),
+    });
+    if (!renewed) {
+      return reply.status(409).send({ error: 'agent_task_lease_lost', agentTaskId, taskRunId: id });
+    }
+    return {
+      ok: true,
+      agentTaskId: renewed.id,
+      leaseVersion: renewed.leaseVersion,
+      leaseExpiresAt: renewed.leaseExpiresAt ?? null,
     };
   });
 

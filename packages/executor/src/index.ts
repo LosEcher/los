@@ -7,7 +7,6 @@ import { initDb, getDb } from '@los/infra/db';
 import { migrateDir } from '@los/infra/migrate';
 import { getLogger } from '@los/infra/logger';
 import {
-  heartbeatAgentTask,
   resolveIdentityLevelForExecutionPath,
   type AgentConfig,
   type AgentModelDelta,
@@ -23,6 +22,7 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import {
+  _renewAgentTaskLease,
   _renewTaskLease,
   _renewTaskRunLease,
   type TaskLeaseHttpTransport,
@@ -386,13 +386,9 @@ async function runAssignedAgentTask(
       leaseHttp.taskToken = initialTaskRunLease.taskToken;
     }
     const initialAgentTaskLease = body.agentTaskLease
-      ? await heartbeatAgentTask(body.agentTaskLease.taskId, {
-          nodeId,
-          leaseVersion: body.agentTaskLease.leaseVersion,
-          leaseMs,
-        })
-      : true;
-    if (!initialTaskRunLease.ok || !initialAgentTaskLease) {
+      ? await _renewAgentTaskLease(taskRunId, nodeId, body.agentTaskLease, leaseMs, leaseHttp)
+      : { ok: true as const };
+    if (!initialTaskRunLease.ok || !initialAgentTaskLease.ok) {
       const reason = initialTaskRunLease.ok ? 'agent_task_lease_lost' : initialTaskRunLease.reason;
       throw new Error(`execution lease lost before executor start for task run ${taskRunId} (${reason})`);
     }
