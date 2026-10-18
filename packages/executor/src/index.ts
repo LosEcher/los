@@ -22,6 +22,7 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
+import { GatewayEventSink } from './gateway-event-sink.js';
 import {
   _renewAgentTaskLease,
   _renewTaskLease,
@@ -239,6 +240,7 @@ export async function startExecutor() {
           activeTaskCount: lifecycle.activeTaskCount,
           taskTokenMode,
           db: dbDisabled ? 'none' : 'postgres',
+          eventBacklog: activeEventBacklog,
           leaseTransport: gatewayUrl ? 'http-when-token' : 'db',
         });
         return;
@@ -270,10 +272,10 @@ export async function startExecutor() {
         try {
           const body = await readJson<RunAgentRequest>(req);
           if (acceptsNdjson(req)) {
-            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller, gatewayUrl, taskTokenMode);
+            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db');
             return;
           }
-          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller, gatewayUrl, taskTokenMode);
+          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db');
           sendJson(res, 200, result);
           return;
         } finally {
@@ -334,6 +336,7 @@ async function streamAssignedAgentTask(
   controller: AbortController,
   gatewayUrl?: string,
   taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
+  eventPersistence: 'db' | 'callback' = 'db',
 ): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson',
@@ -347,7 +350,7 @@ async function streamAssignedAgentTask(
   };
 
   try {
-    await runAssignedAgentTask(body, nodeId, emit, controller, gatewayUrl, taskTokenMode);
+    await runAssignedAgentTask(body, nodeId, emit, controller, gatewayUrl, taskTokenMode, eventPersistence);
   } catch (err: any) {
     emit({ type: 'error', error: err?.message ?? String(err) });
   } finally {
@@ -362,6 +365,7 @@ async function runAssignedAgentTask(
   controller = new AbortController(),
   gatewayUrl?: string,
   taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
+  eventPersistence: 'db' | 'callback' = 'db',
 ) {
   const taskRunId = normalizeRequiredString(body.taskRunId, 'taskRunId');
   const prompt = normalizeRequiredString(body.prompt, 'prompt');
@@ -394,6 +398,10 @@ async function runAssignedAgentTask(
       ? { gatewayUrl, taskToken: body.taskToken }
       : undefined;
 
+  const eventSink = eventPersistence === 'callback' && gatewayUrl
+    ? new GatewayEventSink({ gatewayUrl, taskRunId, getToken: () => leaseHttp?.taskToken })
+    : undefined;
+
   const heartbeat = setInterval(() => {
     _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller, leaseHttp).catch((err) => {
       log.warn(`task lease heartbeat failed: ${err.message ?? String(err)}`);
@@ -420,8 +428,10 @@ async function runAssignedAgentTask(
         level: resolveIdentityLevelForExecutionPath('remote-executor'),
       },
       signal: controller.signal,
+      eventPersistence,
       onSessionEvent: (event) => {
         events.push(event);
+        eventSink?.enqueue(event);
         emit?.({ type: 'session_event', event });
       },
       onModelDelta: (delta) => {
@@ -437,7 +447,10 @@ async function runAssignedAgentTask(
       emit?.({ type: 'kernel_event', kernelEvent });
     });
     emit?.({ type: 'result', result });
-    return { result, events, deltas, toolCallStates, kernelEvents };
+    const eventBacklog = eventSink ? await eventSink.drain(10_000) : 0;
+    activeEventBacklog = eventBacklog;
+    if (eventBacklog > 0) log.warn(`event sink backlog after task ${taskRunId}: ${eventBacklog}`);
+    return { result, events, deltas, toolCallStates, kernelEvents, eventBacklog };
   } finally {
     clearInterval(heartbeat);
   }
@@ -454,6 +467,7 @@ function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): str
 }
 
 let activeExecutor: Awaited<ReturnType<typeof startExecutor>> | undefined;
+let activeEventBacklog = 0;
 let shutdownRequested = false;
 
 import { pathToFileURL } from 'node:url';
