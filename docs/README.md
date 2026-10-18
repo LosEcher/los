@@ -126,6 +126,12 @@ replaced it, the real-call outcomes wired into scoring, the executor's two compe
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
 
+Use `operations/2026-10-19-b2-canary-rollout.md` for the node34 B2 canary
+rollout: target digest `b191b9d28dac2`, live `run_shell` denial with
+`enforcementMode=block`, rollback artifacts, and the finding that
+`deploy-to-remote.sh promote` cannot run on a stateless node (the registry was
+already online).
+
 Use `operations/2026-10-19-b2-approval-and-convergence-hardening.md` for the
 B2 follow-up that closed ADR 0050's three gaps: stateless approval now forces
 `block`, the orphan sweep covers succeeded tasks, completion signals
