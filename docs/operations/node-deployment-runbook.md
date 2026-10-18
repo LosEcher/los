@@ -144,7 +144,7 @@ failed task-token heartbeat never falls back to the DB.
 
 | Mode | Startup | Required configuration | `/health` evidence |
 | --- | --- | --- | --- |
-| `required` (control plane, default) | `initDb` + migrations + agent stores + file-sync | `DATABASE_URL` | `db=postgres` |
+| `required` (control plane, default) | `initDb` + migrations + agent stores + file-sync | `DATABASE_URL`; `GATEWAY_URL` when `EXECUTOR_TASK_TOKEN_MODE=required` | `db=postgres` |
 | `none` (stateless canary) | skips DB bootstrap, agent stores, and file-sync endpoints | `GATEWAY_URL`, `EXECUTOR_TASK_TOKEN_MODE=required`; **no** `DATABASE_URL` | `db=none`, `taskTokenMode=required`, `leaseTransport=http-when-token` |
 | undeclared (legacy) | current DB path | `DATABASE_URL` (this runbook's existing requirement), `GATEWAY_URL` recommended | `mode` warns; no mode is invented |
 
@@ -160,24 +160,43 @@ digest and ship tarball:
 
 | Path (under the executor's cwd) | Owner / mode | Meaning |
 | --- | --- | --- |
-| `.los-runtime/executor-events/<nodeId>/` | service user | session-event spool, one subdirectory per task; replayed with the node credential |
-| `.los-runtime/executor-artifacts/<nodeId>/` | service user | local artifact CAS |
+| `.los-runtime/executor-events/<nodeId>/` | service user; default umask (commonly `0755`/`0644`) | session-event spool, one subdirectory per task; replayed with the node credential |
+| `.los-runtime/executor-artifacts/<nodeId>/` | service user; default umask (commonly `0755`/`0644`) | local artifact CAS |
 | `.los-runtime/executor/node-credential-<nodeId>.json` | service user, file `0600` (parent dir created `0700`; pre-existing dirs are not re-tightened) | rotated per-node credential; takes precedence over `.env` on restart |
+
+The credential file is `0600`; the spool and artifact store are created with
+the service user's umask (commonly `0755` dirs / `0644` files) and the executor
+does not tighten them. On a multi-user node, `chmod 700` those two directories
+and `chmod 600` the files (or run the executor as the only user with access):
+session events and patches are not public data.
 
 Do not delete the spool to "clean up" a node: it holds events the gateway has
 not acknowledged. A non-zero `eventBacklog`/`spoolBacklog` is a sink lag, not a
 deploy failure; `LOS_DEPLOY_REQUIRE_ZERO_BACKLOG=1` turns it into a hard
 failure when a zero-backlog rollout is the acceptance condition.
 
-Verification has one implementation: `tools/deploy-to-remote.sh`'s
-`validate_mode_env`. It runs in `preflight` (env only), `verify` (env +
-`/health`), the read-only `mode` command, and the local `mode-check` fixture
-entry point. Do not restate the rules in a second script.
+Verification has one policy implementation (`validate_mode_env`) and one env
+parser (`tools/executor-mode-snapshot.mjs`, which mirrors `loadEnvFile`). The
+parser is sent over stdin and runs on the node, so preflight works before sync
+and a BOM/NBSP line cannot get a different verdict from the executor. The
+policy runs in `preflight` (env only), `verify` (env + `/health`), the read-only
+`mode` command, and the local `mode-check` fixture entry point. Do not restate
+the rules in a second script.
+
+**The gate validates the `.env` deployment surface.** The process can also read
+`/etc/los/config.yaml`, `~/.los/config.yaml`, systemd `Environment=`/drop-ins,
+and a built-in default `DATABASE_URL`. Declare `DATABASE_URL` (or `none` plus
+`GATEWAY_URL`) in `.env`; a `required` node that relies on a YAML/unit/default
+DB URL is blocked by design, and an undeclared `.env` with health `db=none` is
+rejected as a mode mismatch rather than accepted as legacy.
 
 `tools/setup-node.sh` still writes a DB-mode `.env` (it requires
-`DATABASE_URL`). For a first-time no-DB bootstrap, write the mode keys by hand
-per the table above and do not let the bootstrap add `DATABASE_URL`; otherwise
-`preflight` will correctly block the node as `none` + `DATABASE_URL`.
+`DATABASE_URL`) and does not write `EXECUTOR_DB_MODE`. That shape passes as
+**legacy + DATABASE_URL**; it is not blocked as `none`, because no `none`
+declaration exists yet. For a first-time no-DB bootstrap, remove
+`DATABASE_URL` first, then add `EXECUTOR_DB_MODE=none` plus
+`EXECUTOR_TASK_TOKEN_MODE=required` and `GATEWAY_URL`. Adding `none` while
+`DATABASE_URL` is still present is what `preflight` blocks.
 
 ## Preflight
 
@@ -193,7 +212,8 @@ per the table above and do not let the bootstrap add `DATABASE_URL`; otherwise
 4. Confirm `.env` declares a mode and contains the keys that mode requires,
    without printing values:
    - `EXECUTOR_DB_MODE=required`: `DATABASE_URL`, `EXECUTOR_AGENT_KEY`,
-     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, `GATEWAY_URL`.
+     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, and `GATEWAY_URL` when
+     `EXECUTOR_TASK_TOKEN_MODE=required`.
    - `EXECUTOR_DB_MODE=none`: `GATEWAY_URL`,
      `EXECUTOR_TASK_TOKEN_MODE=required`, `EXECUTOR_AGENT_KEY`,
      `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`; `DATABASE_URL` **must be absent**.

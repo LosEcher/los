@@ -31,48 +31,22 @@
 set -euo pipefail
 
 # ── Executor DB/token mode contract ─────────────────────────
-# One validator, three callers: `mode-check` (local fixtures), `preflight`
-# (remote .env, no health), and `verify` (remote .env + /health). The point is
-# fail-closed verification of the deployment contract, not a second copy of it:
-# .env.example and the runbook describe the same rules.
-#
-# It deliberately reads only mode-shaped keys. `DATABASE_URL` is reduced to
-# set/unset and `GATEWAY_URL` to set/unset in the printed summary; values are
-# never echoed, logged, or copied into a deploy artifact.
-env_value() {
+# One validator, four callers: `mode-check` (local fixtures), `preflight`
+# (remote .env, no health), `verify` (remote .env + /health), and the read-only
+# `mode` command. The parser lives in tools/executor-mode-snapshot.mjs so the
+# local and remote paths cannot disagree with each other (or with
+# `loadEnvFile()`); this script only enforces the policy.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODE_SNAPSHOT_HELPER="$SCRIPT_DIR/executor-mode-snapshot.mjs"
+
+# Snapshot lines are emitted by the helper: plain `KEY=value`, no quotes/BOM.
+snapshot_value() {
   local file="$1" key="$2"
-  # Mirrors packages/infra/src/config-sources.ts loadEnvFile: trim the line,
-  # skip blanks/comments, split at the first `=`, trim key/value, strip one
-  # matching quote pair, last assignment wins. A stricter parser here would
-  # disagree with the process it is supposed to validate.
-  awk -v want="$key" '
-    {
-      line = $0
-      sub(/\r$/, "", line)
-      gsub(/^[ \t]+|[ \t]+$/, "", line)
-    }
-    line == "" || substr(line, 1, 1) == "#" { next }
-    {
-      eq = index(line, "=")
-      if (eq == 0) next
-      k = substr(line, 1, eq - 1)
-      gsub(/^[ \t]+|[ \t]+$/, "", k)
-      if (k != want) next
-      v = substr(line, eq + 1)
-      gsub(/^[ \t]+|[ \t]+$/, "", v)
-      if ((substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") ||
-          (substr(v, 1, 1) == "\047" && substr(v, length(v), 1) == "\047")) {
-        v = substr(v, 2, length(v) - 2)
-      }
-      found = v
-      have = 1
-    }
-    END { if (have) printf "%s", found }
-  ' "$file"
+  grep -E "^${key}=" "$file" 2>/dev/null | tail -1 | cut -d= -f2-
 }
 
-# Returns 0 only when the env (and optional health JSON) satisfy the declared
-# mode. Prints FAIL/WARN lines to stderr; prints one `mode:` summary line.
+# Returns 0 only when the snapshot (and optional health JSON) satisfy the
+# declared mode. Prints FAIL/WARN lines to stderr; prints one `mode:` summary.
 validate_mode_env() {
   local env_file="$1" health_file="${2:-}"
   local fails=0
@@ -83,20 +57,32 @@ validate_mode_env() {
   note() { printf 'WARN: %s\n' "$*" >&2; }
 
   if [ -z "$env_file" ] || [ ! -r "$env_file" ]; then
-    fail "env snapshot is missing or unreadable: ${env_file:-<none>}"
+    fail "mode snapshot is missing or unreadable: ${env_file:-<none>}"
     printf 'mode-check: FAILED (%d)\n' "$fails" >&2
     return 1
   fi
-  if grep -q '^__ENV_MISSING__$' "$env_file" 2>/dev/null; then
-    fail "the node has no .env at the configured path (mode cannot be declared)"
-    printf 'mode-check: FAILED (%d)\n' "$fails" >&2
-    return 1
-  fi
+  case "$(head -1 "$env_file")" in
+    __ENV_MISSING__)
+      fail "the node has no .env at the configured path (mode cannot be declared)"
+      printf 'mode-check: FAILED (%d)\n' "$fails" >&2
+      return 1
+      ;;
+    __ENV_UNREADABLE__)
+      fail "the node .env is unreadable by the deploy identity (check owner/mode, or use LOS_REMOTE_PRIVILEGE=sudo)"
+      printf 'mode-check: FAILED (%d)\n' "$fails" >&2
+      return 1
+      ;;
+    __ENV_NOT_A_FILE__)
+      fail "the configured .env path is not a regular file"
+      printf 'mode-check: FAILED (%d)\n' "$fails" >&2
+      return 1
+      ;;
+  esac
 
-  db_mode="$(env_value "$env_file" EXECUTOR_DB_MODE)"
-  task_mode="$(env_value "$env_file" EXECUTOR_TASK_TOKEN_MODE)"
-  gateway_url="$(env_value "$env_file" GATEWAY_URL)"
-  database_url="$(env_value "$env_file" DATABASE_URL)"
+  db_mode="$(snapshot_value "$env_file" EXECUTOR_DB_MODE)"
+  task_mode="$(snapshot_value "$env_file" EXECUTOR_TASK_TOKEN_MODE)"
+  gateway_url="$(snapshot_value "$env_file" GATEWAY_URL)"
+  database_url="$(snapshot_value "$env_file" DATABASE_URL)"
 
   case "$db_mode" in
     none)
@@ -162,6 +148,16 @@ validate_mode_env() {
       required)
         [ "$h_db" = "postgres" ] || fail "health.db='${h_db:-<missing>}' but EXECUTOR_DB_MODE=required"
         ;;
+      "")
+        # Undeclared means the legacy DB path. A process booted from a YAML or
+        # unit-level `dbMode: none` would report db=none here; that must not pass
+        # as "legacy is fine" (the false green the adversarial review found).
+        if [ -n "$h_db" ] && [ "$h_db" != "postgres" ]; then
+          fail "health.db='$h_db' but this node declares no EXECUTOR_DB_MODE (legacy assumes postgres); declare none explicitly"
+        elif [ -z "$h_db" ]; then
+          note "health has no db field (older build); legacy mode cannot be confirmed from /health"
+        fi
+        ;;
     esac
     if [ "$task_mode" = "required" ] && [ "$db_mode" != "none" ] && [ -n "$h_lease" ] && [ "$h_lease" != "http-when-token" ]; then
       fail "health.leaseTransport='$h_lease' but EXECUTOR_TASK_TOKEN_MODE=required"
@@ -181,29 +177,44 @@ validate_mode_env() {
   return 1
 }
 
-# Local negative-control entry point. Kept before any node/SSH handling so it
-# can run on a laptop with no route to the fleet:
+# Local negative-control entry point. Runs the same snapshot helper as the node
+# path, so a fixture cannot get a different verdict from the remote validator:
 #   deploy-to-remote.sh mode-check <env-file> [health-json]
 if [ "${1:-}" = "mode-check" ]; then
-  if [ -z "${2:-}" ] || [ "${2:-}" = "-h" ] || [ "${2:-}" = "--help" ]; then
-    cat <<'EOF'
-mode-check — validate an executor env snapshot (and optional /health JSON)
+  case "${2:-}" in
+    "" )
+      echo "usage: deploy-to-remote.sh mode-check <env-file> [health-file]" >&2
+      exit 2
+      ;;
+    -h|--help)
+      cat <<'EOF'
+mode-check — validate an executor env file (and optional /health JSON)
 
 Usage:
   deploy-to-remote.sh mode-check <env-file> [health-file]
 
-Rules: EXECUTOR_DB_MODE=none requires no DATABASE_URL, a GATEWAY_URL, and
-EXECUTOR_TASK_TOKEN_MODE=required; health must report db=none and
+The env file is parsed by tools/executor-mode-snapshot.mjs, the same helper the
+node path uses. EXECUTOR_DB_MODE=none requires no DATABASE_URL, a GATEWAY_URL,
+and EXECUTOR_TASK_TOKEN_MODE=required; health must report db=none and
 leaseTransport=http-when-token. EXECUTOR_DB_MODE=required requires DATABASE_URL
-and health db=postgres. An undeclared mode is legacy and warns, but it
-still needs DATABASE_URL.
+and health db=postgres. An undeclared mode is legacy and warns, but it still
+needs DATABASE_URL and health.db=postgres when /health is supplied.
 
 Set LOS_DEPLOY_REQUIRE_ZERO_BACKLOG=1 to fail on non-zero event/spool backlog.
 EOF
-    exit 0
+      exit 0
+      ;;
+  esac
+  mode_snapshot="$(mktemp "${TMPDIR:-/tmp}/los-executor-mode.XXXXXX")"
+  if ! node "$MODE_SNAPSHOT_HELPER" "$2" > "$mode_snapshot"; then
+    rm -f "$mode_snapshot"
+    echo "FAIL: executor-mode-snapshot.mjs could not read $2" >&2
+    exit 2
   fi
-  validate_mode_env "$2" "${3:-}"
-  exit $?
+  validate_mode_env "$mode_snapshot" "${3:-}"
+  mode_rc=$?
+  rm -f "$mode_snapshot"
+  exit "$mode_rc"
 fi
 
 NODE="${1:-}"
@@ -386,17 +397,10 @@ remote_su_sh() {
 # DATABASE_URL to set/unset, so a credential never leaves the host. Output is a
 # tiny env-shaped snapshot consumed by validate_mode_env.
 read_remote_mode_env() {
-  remote_sh bash -c '
-f="$1"
-if [ ! -f "$f" ]; then printf "__ENV_MISSING__\n"; exit 0; fi
-get() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$f" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//"; }
-printf "EXECUTOR_DB_MODE=%s\n" "$(get EXECUTOR_DB_MODE)"
-printf "EXECUTOR_TASK_TOKEN_MODE=%s\n" "$(get EXECUTOR_TASK_TOKEN_MODE)"
-printf "GATEWAY_URL=%s\n" "$(get GATEWAY_URL)"
-dbv="$(get DATABASE_URL)"
-dbv="${dbv%\"}"; dbv="${dbv#\"}"
-if [ -n "$dbv" ]; then printf "DATABASE_URL=<redacted>\n"; else printf "DATABASE_URL=\n"; fi
-' _ "$REMOTE_HOME/.env"
+  # Run the local helper over stdin instead of requiring a synced copy on the
+  # node: preflight runs before sync, so a remote helper file would create a
+  # bootstrap deadlock (and would let old/new helper versions disagree).
+  remote_sh node --input-type=module - "$REMOTE_HOME/.env" < "$MODE_SNAPSHOT_HELPER"
 }
 
 # Fail-closed mode gate used by preflight (env only) and verify (env + health).
@@ -878,6 +882,12 @@ do_install_service() {
   local log_file="$LOG_BASE/${NODE}-install-service-${TIMESTAMP}.log"
   log_info "installing systemd service on $TS_HOST (log: $log_file)"
 
+  # install-service starts or restarts the unit. Gate it here too: `deploy` and
+  # standalone use must not restart a node whose declared mode is violated.
+  if ! check_remote_mode; then
+    die "refusing to install/start the service: executor mode contract violated (see FAIL lines; run sync first if the helper is missing)"
+  fi
+
   remote_sh bash -s "$REMOTE_HOME" <<'INSTALL_SVC' >> "$log_file" 2>&1
 set -euo pipefail
 LOS_HOME="$1"
@@ -914,6 +924,10 @@ do_restart() {
   log_info "restarting executor on $TS_HOST..."
   local log_file="$LOG_BASE/${NODE}-restart-${TIMESTAMP}.log"
 
+  if ! check_remote_mode; then
+    die "refusing to restart: executor mode contract violated (see FAIL lines; run sync first if the helper is missing)"
+  fi
+
   if remote_sh test -f /etc/systemd/system/los-executor.service 2>/dev/null; then
     remote_sh systemctl restart los-executor >> "$log_file" 2>&1
     log_info "  service restarted (systemd)"
@@ -927,14 +941,26 @@ do_restart() {
 
 # ── Verify ──────────────────────────────────────────────────
 do_verify() {
-  local port="${EXECUTOR_PORT:-}"
   local log_file="$LOG_BASE/${NODE}-verify-${TIMESTAMP}.log"
   log_info "verifying executor on $TS_HOST (log: $log_file)"
 
-  if [ -z "$port" ]; then
-    port=$(remote_sh awk -F= '/^EXECUTOR_PORT=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
+  # One snapshot, one parser. Port, gateway and mode all come from the same
+  # lines the executor reads; a second awk/grep here was how a quoted or
+  # space-padded GATEWAY_URL produced a false red after the validator passed.
+  local mode_snapshot=""
+  mode_snapshot="$(mktemp "${TMPDIR:-/tmp}/los-executor-mode.XXXXXX")"
+  if ! read_remote_mode_env > "$mode_snapshot"; then
+    rm -f "$mode_snapshot"
+    die "could not read mode keys from $REMOTE_HOME/.env"
   fi
+  local port="${EXECUTOR_PORT:-}"
+  [ -n "$port" ] || port="$(snapshot_value "$mode_snapshot" EXECUTOR_PORT)"
   port="${port:-8090}"
+  local connect_host=""
+  connect_host="$(snapshot_value "$mode_snapshot" EXECUTOR_HOST)"
+  case "$connect_host" in
+    ""|0.0.0.0|::|"[::]") connect_host="127.0.0.1" ;;
+  esac
 
   # 1. Service status
   printf '=== systemd status ===\n' >> "$log_file"
@@ -969,7 +995,7 @@ do_verify() {
   local health=""
   local attempt
   for attempt in $(seq 1 30); do
-    health=$(remote_sh curl -sf "http://127.0.0.1:$port/health" 2>/dev/null || true)
+    health=$(remote_sh curl -sf "http://$connect_host:$port/health" 2>/dev/null || true)
     [ -n "$health" ] && break
     sleep 1
   done
@@ -987,19 +1013,21 @@ do_verify() {
   log_info "  version: $BUILD_VERSION"
 
   # 2b. Mode contract (fail-closed). The version can match while the node is
-  #     mislabeled — e.g. `db=none` with a leftover DATABASE_URL, or a token
-  #     mode that would let a 401 fall back to the DB. Refuse before reporting
-  #     a healthy rollout.
+  #     mislabeled — e.g. `db=none` with a leftover DATABASE_URL, a health
+  #     `db=postgres` on a legacy node, or a token mode that would let a 401
+  #     fall back to the DB. Refuse before reporting a healthy rollout.
   local mode_health=""
   mode_health="$(mktemp "${TMPDIR:-/tmp}/los-executor-health.XXXXXX")"
   printf '%s' "$health" > "$mode_health"
-  if ! check_remote_mode "$mode_health"; then
-    rm -f "$mode_health"
+  if ! validate_mode_env "$mode_snapshot" "$mode_health"; then
+    rm -f "$mode_health" "$mode_snapshot"
     die "executor mode contract violated — verify must not report success (see FAIL lines)"
   fi
   rm -f "$mode_health"
-  local db_mode=""
-  db_mode=$(remote_sh awk -F= '/^EXECUTOR_DB_MODE=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
+  local db_mode="" gateway_url=""
+  db_mode="$(snapshot_value "$mode_snapshot" EXECUTOR_DB_MODE)"
+  gateway_url="$(snapshot_value "$mode_snapshot" GATEWAY_URL)"
+  rm -f "$mode_snapshot"
 
   # 3. Port listening
   printf '\n=== port listener ===\n' >> "$log_file"
@@ -1009,8 +1037,6 @@ do_verify() {
   # 4. GATEWAY_URL reachability check (dead-gateway guard — heartbeat fails
   #    silently otherwise; vultr/tencent-sin crashed/starved on a stale URL)
   printf '\n=== gateway reachability ===\n' >> "$log_file"
-  local gateway_url=""
-  gateway_url=$(remote_sh awk -F= '/^GATEWAY_URL=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
   if [ -n "$gateway_url" ]; then
     if curl -sf --max-time 5 "${gateway_url%/}/health" >/dev/null 2>&1; then
       log_info "  gateway $gateway_url: reachable"
@@ -1103,6 +1129,9 @@ do_cmd() {
 
 # ── Composite: deploy (all-in-one legacy compat) ────────────
 do_deploy() {
+  # The gate lives inside do_install_service (it starts/restarts the unit), so
+  # `deploy` cannot skip it. Keep this composition explicit rather than adding
+  # a second preflight/resource check.
   do_sync && do_install && do_install_service
 }
 
@@ -1256,9 +1285,7 @@ do_digest() {
 # or digest assertion. Useful after a restart, during an incident, and as the
 # live acceptance surface for the deployment contract.
 do_mode() {
-  local port="" health_file snapshot rc=0
-  port=$(remote_sh awk -F= '/^EXECUTOR_PORT=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
-  port="${port:-8090}"
+  local health_file snapshot rc=0 port connect_host
   snapshot="$(mktemp "${TMPDIR:-/tmp}/los-executor-mode.XXXXXX")"
   health_file="$(mktemp "${TMPDIR:-/tmp}/los-executor-health.XXXXXX")"
 
@@ -1267,9 +1294,15 @@ do_mode() {
     rm -f "$snapshot" "$health_file"
     return 1
   fi
+  port="$(snapshot_value "$snapshot" EXECUTOR_PORT)"
+  port="${port:-8090}"
+  connect_host="$(snapshot_value "$snapshot" EXECUTOR_HOST)"
+  case "$connect_host" in
+    ""|0.0.0.0|::|"[::]") connect_host="127.0.0.1" ;;
+  esac
   # A dead /health is a failure, not an empty state: the validator then reports
   # an empty health snapshot instead of inventing a healthy mode.
-  remote_sh curl -sf --max-time 8 "http://127.0.0.1:$port/health" > "$health_file" 2>/dev/null || true
+  remote_sh curl -sf --max-time 8 "http://$connect_host:$port/health" > "$health_file" 2>/dev/null || true
 
   validate_mode_env "$snapshot" "$health_file" || rc=$?
   rm -f "$snapshot" "$health_file"

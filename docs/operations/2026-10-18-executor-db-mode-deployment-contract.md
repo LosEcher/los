@@ -74,13 +74,16 @@ every executor must have `DATABASE_URL`.
   unset or `health.db != postgres`.
 - An undeclared mode is treated as **legacy** and warns (it does not invent a
   mode), but it must still have `DATABASE_URL`; otherwise it fails. An invalid
-  value fails. Env parsing mirrors `loadEnvFile` (trim, matching quotes, last
+  value fails. Env parsing lives in `tools/executor-mode-snapshot.mjs` and is
+  tested against `loadEnvFile` (trim/BOM/NBSP, matching quotes, CRLF, last
   assignment wins), so the validator cannot disagree with the process about
   what a line means.
 - Local negative controls are runnable without a node:
   `deploy-to-remote.sh mode-check <env-file> [health-json]`.
-- Existing DB-mode nodes keep their behaviour (missing `GATEWAY_URL` remains a
-  warning for legacy/`required`, not a new hard failure).
+- Existing DB-mode nodes keep their behaviour when the token mode is `auto` or
+  `off`: a missing `GATEWAY_URL` is a warning, not a new hard failure. With
+  `EXECUTOR_TASK_TOKEN_MODE=required` it is a hard failure, matching the
+  executor's startup assertion.
 
 **Proof**: `bash -n`; the `mode-check` negative-control matrix below; live
 `mode` on node34.
@@ -124,7 +127,7 @@ every executor must have `DATABASE_URL`.
 | Surface | Change |
 | --- | --- |
 | `.env.example` | `EXECUTOR_DB_MODE` (`required`/`none`, no auto-fallback, canary status, fail-closed rollback), `GATEWAY_URL` requirement, token-mode failure semantics, artifact root, node credential keys, and the local-state ownership table (event spool, artifact CAS, credential file). `DATABASE_URL` is now scoped to the control plane / `required` executors. |
-| `tools/deploy-to-remote.sh` | One `validate_mode_env` used by `preflight` (env only), `verify` (env + `/health`), the new read-only `<node> mode`, and the local `mode-check` fixture command. `none` + any violation fails; `required` without `DATABASE_URL` fails; an undeclared mode stays legacy with a warning but must still have `DATABASE_URL`. Env parsing mirrors `loadEnvFile`. `verify` also stops treating a missing `GATEWAY_URL` as "direct-to-DB mode" on a `none` node, and refuses an unreachable gateway for `none`. |
+| `tools/deploy-to-remote.sh` | One env parser (`tools/executor-mode-snapshot.mjs`) and one `validate_mode_env` used by `preflight` (env only), `verify` (env + `/health`), the new read-only `<node> mode`, and the local `mode-check` fixture command. The parser runs on the node over stdin, so preflight works before sync. `none` + any violation fails; `required` without `DATABASE_URL` fails; an undeclared mode stays legacy with a warning but must still have `DATABASE_URL`. Env parsing mirrors `loadEnvFile`. `verify` also stops treating a missing `GATEWAY_URL` as "direct-to-DB mode" on a `none` node, and refuses an unreachable gateway for `none`. |
 | `docs/operations/node-deployment-runbook.md` | New "Executor DB Modes" section, mode-aware preflight, mode evidence in cutover verification, local-state ownership, and a no-DB rollback procedure. |
 | `docs/README.md` | Operation-smoke index entry for this document. |
 
@@ -153,7 +156,7 @@ the OpenSSH alias `localnode34-r-t`. `[E]` = exact output below.
 
 ```text
 $ ssh localnode34-r-t 'grep -E "^(EXECUTOR_DB_MODE|EXECUTOR_TASK_TOKEN_MODE|GATEWAY_URL)=" /opt/los/.env; grep -c "^DATABASE_URL=" /opt/los/.env'
-GATEWAY_URL=http://100.112.77.123:8080
+GATEWAY_URL=http://<gateway>:8080
 EXECUTOR_TASK_TOKEN_MODE=required
 EXECUTOR_DB_MODE=none
 0
@@ -212,7 +215,7 @@ health: ok
 version: 0.1.0+bc63799a80f0c
 mode: db=none taskToken=required gateway=set database=unset
 mode-check: ok
-gateway http://100.112.77.123:8080: reachable
+gateway http://<gateway>:8080: reachable
 stateless node: no executor DB writes; check the registry from the gateway
 unirun: ok (0.5.0)
 verify complete
@@ -289,11 +292,11 @@ rollout must sync first.
 
 ### Residual risks and what this does not prove
 
-1. **Legacy declarations are still a hole.** An undeclared `EXECUTOR_DB_MODE`
-   with a `DATABASE_URL` keeps the old DB path and passes with a `WARN`. A node
-   that *should* be `none` but never declares it is not detected. Migration
-   item: declare the mode on every node before treating the fleet as
-   contract-conformant. (Undeclared **and** no `DATABASE_URL` does fail.)
+1. **Legacy declarations are still a migration item.** An undeclared
+   `EXECUTOR_DB_MODE` with a `DATABASE_URL` and `health.db=postgres` passes with
+   a `WARN`; that is a real DB-mode node. It can no longer pass while reporting
+   `db=none` (fixed in §6, M2). Declare the mode on every node to remove the
+   warning, but an undeclared DB node is not a false green.
 2. **Backlog is a warning by default.** A `none` node with a non-zero
    `eventBacklog`/`spoolBacklog` still verifies (events are spooled, not
    necessarily lost). Use `LOS_DEPLOY_REQUIRE_ZERO_BACKLOG=1` when zero backlog
@@ -310,3 +313,122 @@ rollout must sync first.
    change the fail-closed close decision. It only makes the existing contract
    checkable before a restart.
 6. **GitHub mirror untouched.** Forgejo is the only remote used by this batch.
+
+## 6. Adversarial follow-up (2026-10-18, after PR #373)
+
+An independent adversarial review of PR #373 found one blocker and five major
+gaps. They were fixed in a follow-up change; this section records the findings
+because the first batch's "one implementation" claim was false as merged.
+
+### B1 — parser divergence (fixed)
+
+The original validator parsed `.env` in bash/awk. `loadEnvFile()` uses
+JavaScript `.trim()`, which also strips BOM (U+FEFF) and NBSP. A file whose
+first line was `\uFEFFDATABASE_URL=...` was read by the process as a set DB URL
+but by the validator as absent, so `db=none + DATABASE_URL` passed preflight,
+`mode`, and `verify`.
+
+Fix: one parser, `tools/executor-mode-snapshot.mjs`, used by `mode-check` and
+sent over stdin for the node path (so preflight works before sync and no remote
+copy can drift). `tools/executor-mode-snapshot.test.mjs` asserts parity with
+`loadEnvFile` for BOM, NBSP, CRLF, quotes, duplicates, empty values, comments,
+`export` prefixes, and `=` inside values.
+
+### M1 — second parser in verify (fixed)
+
+`verify` read `db_mode`, `gateway_url`, and `port` with separate `awk` calls
+(first-match, no trim/quotes). A quoted or space-padded `GATEWAY_URL` passed the
+validator and then failed the gateway curl; a space-padded `EXECUTOR_DB_MODE`
+could skip the no-DB gateway guard. Fix: `verify` and `mode` take all three
+values from the same snapshot, including `EXECUTOR_HOST`/`EXECUTOR_PORT` for the
+local health probe.
+
+### M2 — legacy mode ignored `/health` (fixed)
+
+`mode-check` with only `DATABASE_URL` and `health.db=none` returned 0. Fix:
+legacy mode now requires `health.db=postgres` when the field is present (a
+missing field is an older-build warning), closing the YAML/unit-override route
+to a `none` process passing as legacy.
+
+### M3 — `deploy` and `restart` could skip the gate (fixed)
+
+`deploy` was `sync + install + install-service`, and `install-service` started
+the unit. Both `install-service` and `restart` now run `check_remote_mode`
+before touching the service, so a violating node is not restarted. Negative
+fixtures for both paths exit 1 before the systemd step.
+
+### M4 — unreadable `.env` looked absent (fixed)
+
+The helper distinguishes `__ENV_MISSING__`, `__ENV_UNREADABLE__`, and
+`__ENV_NOT_A_FILE__`; the validator reports an owner/mode/`sudo` hint instead of
+"undeclared and DATABASE_URL unset".
+
+### M5 — non-`.env` config sources (documented)
+
+The process also reads YAML, systemd environment, and a built-in default DB
+URL. The gate is explicitly the `.env` deployment contract: declare
+`DATABASE_URL` (or `none`+`GATEWAY_URL`) in `.env`. The false-green half is
+closed by M2; the false-red half is a documented deployment rule, not a parser
+bug. A process-level assertion remains a follow-up (it needs an executor
+rollout).
+
+### Smaller fixes
+
+- `mode-check` with no argument exits 2, not 0.
+- `EXECUTOR_TASK_TOKEN_MODE=off` wording no longer implies "no gateway".
+- `503 token_not_configured` is listed next to 401/403/409; node heartbeats are
+  distinguished from task-lease heartbeats.
+- The `deploy/systemd/los-executor.service` comment still names `DATABASE_URL`
+  as universal. It is deferred to a deploy-surface change: `deploy/` is not a
+  path-gate safe prefix, so including it makes CI run the heavy web-e2e suite,
+  which currently fails on a pre-existing `fleet-topology` spec that proxies to
+  an absent gateway on `127.0.0.1:8080`. The runbook carries the mode guidance
+  in the meantime.
+- The credential dir caveat and the spool/CAS umask caveat are in both
+  `.env.example` and the runbook.
+- The gateway/tailnet address is redacted from this document's evidence.
+
+The parity test is wired through `tools/ci-gate.sh` (the gate-fast `--no-tests`
+lane), not `package.json`, so this change stays inside the path gate's safe
+prefixes and does not re-run the unrelated web-e2e job.
+
+The follow-up's own live evidence is recorded in §7.
+
+## 7. Follow-up evidence
+
+`[E]` on 2026-10-18, same host/alias as §4.
+
+```text
+# B1 through the local and node paths
+$ deploy-to-remote.sh mode-check <bom.env> <ok.health>
+mode: db=none taskToken=required gateway=set database=set
+FAIL: EXECUTOR_DB_MODE=none but DATABASE_URL is set ...
+RC=1
+
+$ LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET=localnode34-r-t \
+    deploy-to-remote.sh node34 mode
+mode: db=none taskToken=required gateway=set database=unset
+mode-check: ok
+[deploy:node34] mode contract: OK
+
+# legacy + health db=none is rejected (M2)
+$ deploy-to-remote.sh mode-check <legacy.env> <db-none.health>
+FAIL: health.db='none' but this node declares no EXECUTOR_DB_MODE ...
+RC=1
+
+# install-service/restart gate (negative fixture)
+$ LOS_SSH_TRANSPORT=local LOS_REMOTE_HOME=<fixture> deploy-to-remote.sh fake-node restart
+FAIL: EXECUTOR_DB_MODE=none but DATABASE_URL is set ...
+FATAL: refusing to restart: executor mode contract violated
+RC=1
+
+# parser parity and sentinels
+$ node --test tools/executor-mode-snapshot.test.mjs
+# tests 5, pass 5, fail 0
+```
+
+`verify` was re-run on node34 with the recorded build override and
+auto-promote disabled; it passed with the same mode line. `preflight` passed.
+The legacy DB node `mbp-executor-1` still passes `mode` with a WARN (its
+`/health` predates the `db` field), which is the intended backward-compatible
+path.

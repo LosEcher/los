@@ -319,6 +319,17 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
+# ── Phase 7b: tools contract tests ────────────────────────
+# Gate-level tests for tools/ that are not part of a workspace package. They
+# run even with --no-tests: they are cheap and guard the deploy contract.
+phase_start "Tools contract tests (executor mode snapshot parity)"
+if node --test ./tools/executor-mode-snapshot.test.mjs; then
+  phase_ok "tools-contract"
+else
+  phase_fail "tools-contract"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
 # ── Phase 8: tests ─────────────────────────────────────────
 
 if [ "$SKIP_TESTS" -eq 1 ]; then
