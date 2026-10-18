@@ -74,6 +74,11 @@ export interface AgentConfig {
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
+  /**
+   * Capability permissions the run refuses outright, e.g. ['runtime:spawn'].
+   * Checked against `ToolCapability.permissions` before any tool executes.
+   */
+  deniedToolPermissions?: readonly string[];
   /** Advisory checks against persisted tool-failure and fragile-file evidence. */
   preActionGate?: AgentPreActionGateConfig;
   /**

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createToolRegistry, registerBuiltinTools } from './registry.js';
 import {
   assertCapabilityDeclaration,
+  checkCapability,
   evaluateApprovalGate,
   normalizeCapability,
 } from './registry-policy.js';
@@ -81,4 +82,28 @@ test('every L2 builtin declares approval, a side effect, and a permission', asyn
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
+});
+
+test('a denied permission blocks the tool before it runs', () => {
+  const capability = normalizeCapability('run_runtime_task', {
+    riskLevel: 'L2',
+    permissions: ['runtime:spawn'],
+    sideEffect: true,
+    needsApproval: false,
+  });
+  const decision = checkCapability(capability, { deniedPermissions: ['runtime:spawn'] });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reasonCode, 'tool_permission_denied');
+  assert.match(decision.reason, /runtime:spawn/);
+});
+
+test('a permission the run did not deny still passes', () => {
+  const capability = normalizeCapability('run_shell', {
+    riskLevel: 'L2',
+    permissions: ['workspace:shell'],
+    sideEffect: true,
+    needsApproval: false,
+  });
+  const decision = checkCapability(capability, { deniedPermissions: ['runtime:spawn'] });
+  assert.equal(decision.allowed, true);
 });

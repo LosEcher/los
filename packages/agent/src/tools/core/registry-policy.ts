@@ -25,6 +25,7 @@ export type ToolExecutionReasonCode =
   | 'tool_risk_exceeded'
   | 'tool_writes_disabled'
   | 'tool_sandbox_required'
+  | 'tool_permission_denied'
   | 'tool_approval_required'
   | 'phase_blocked'
   | 'operator_rule_block';
@@ -97,6 +98,8 @@ export interface ToolExecutionPolicy {
   maxRiskLevel?: ToolRiskLevel;
   allowWrites?: boolean;
   sandboxAvailable?: boolean;
+  /** Permissions refused by this run (exact match against capability.permissions). */
+  deniedPermissions?: readonly string[];
   retry?: Partial<ToolRetryPolicy>;
 }
 
@@ -216,6 +219,18 @@ export function checkCapability(  capability: ToolCapability | undefined,
 ): { allowed: true; capability: ToolCapability } | { allowed: false; reasonCode: ToolExecutionReasonCode; reason: string } {
   if (!capability) {
     return { allowed: false, reasonCode: 'tool_capability_missing', reason: 'Tool capability missing' };
+  }
+
+  const denied = policy.deniedPermissions ?? [];
+  if (denied.length > 0) {
+    const hit = capability.permissions.find(permission => denied.includes(permission));
+    if (hit) {
+      return {
+        allowed: false,
+        reasonCode: 'tool_permission_denied',
+        reason: `Permission denied for this run: ${hit} (${capability.name})`,
+      };
+    }
   }
 
   const maxRiskLevel = policy.maxRiskLevel ?? 'L2';

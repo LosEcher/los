@@ -161,7 +161,7 @@ export function setupAgentRun(
   }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode, config.planningTransport);
   const sandboxMode = config.sandboxMode ?? 'workspace-write';
-  const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode);
+  const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode, config.deniedToolPermissions);
   const signal = config.signal;
 
   // Inject provider context window into compression config so large-window

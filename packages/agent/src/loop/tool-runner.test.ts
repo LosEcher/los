@@ -103,6 +103,7 @@ function buildPolicy(): Resolver {
     maxRiskLevel: 'L2',
     allowWrites: true,
     sandboxAvailable: false,
+    deniedPermissions: undefined,
     retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
   };
 }
