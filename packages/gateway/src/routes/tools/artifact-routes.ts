@@ -103,12 +103,34 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     const targetNodeId = normalizeOptionalString(body?.nodeId);
     if (!targetNodeId) return reply.status(422).send({ error: 'nodeId is required' });
 
-    const source = await loadArtifact(id);
+    const source = await loadArtifact(id) ?? await loadRemoteArtifactAsRecord(id);
     if (!source) return reply.status(404).send({ error: 'artifact not found' });
-    const artifactsUrl = await artifactOwnerUrl(targetNodeId);
-    if (!artifactsUrl) return reply.status(404).send({ error: 'target executor not found' });
 
     const content = await readArtifactContentFromOwner(source, options.executorAgentKey);
+    const artifactsUrl = await artifactOwnerUrl(targetNodeId);
+    if (!artifactsUrl) {
+      if (targetNodeId !== 'gateway-local') {
+        return reply.status(404).send({ error: 'target executor not found' });
+      }
+      // Return direction: source lives on an executor, target is this gateway.
+      // Use a new local id rather than overwriting the owner's shared-DB row.
+      const local = await putArtifact({
+        artifactId: `${source.artifactId}-gateway`,
+        nodeId: targetNodeId,
+        sessionId: source.sessionId,
+        taskRunId: source.taskRunId,
+        traceId: source.traceId,
+        requestId: source.requestId,
+        path: source.originalPath,
+        pathPolicy: source.pathPolicy,
+        content: content.content,
+        contentType: source.contentType,
+        metadata: { ...source.metadata, relayedFrom: source.nodeId },
+        storageRoot: options.storageRoot,
+      });
+      return reply.status(201).send({ ok: true, artifact: local });
+    }
+
     // Owner and gateway share the artifacts table; a distinct owner-side id
     // prevents the two index rows from overwriting each other.
     const remoteArtifactId = `${source.artifactId}-relay-${targetNodeId}`;
@@ -177,18 +199,22 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     const { id } = req.params as { id: string };
     const body = req.body as { reason?: string } | undefined;
     const existing = await loadArtifact(id);
-    if (!existing) {
-      const relayed = await loadRemoteArtifactAsRecord(id);
-      if (!relayed) return reply.status(404).send({ error: 'artifact not found' });
+    // Deleting a source must also delete its relayed owner copy; otherwise the
+    // index resurrects the artifact through GET /artifacts/:id/content.
+    const relayed = await loadRemoteArtifactAsRecord(id);
+    if (!existing && !relayed) return reply.status(404).send({ error: 'artifact not found' });
+    if (relayed) {
       await deleteArtifactFromOwner(relayed, normalizeOptionalString(body?.reason), options.executorAgentKey);
       await deleteRemoteArtifactIndex(id);
-      return { ok: true, artifact: { ...relayed, deletedAt: new Date().toISOString() } };
+    }
+    if (!existing) {
+      return { ok: true, artifact: { ...relayed!, deletedAt: new Date().toISOString() } };
     }
     const remote = await deleteArtifactFromOwner(existing, normalizeOptionalString(body?.reason), options.executorAgentKey);
     if (remote) return remote;
     const artifact = await deleteArtifact(id, normalizeOptionalString(body?.reason));
     if (!artifact) return reply.status(404).send({ error: 'artifact not found' });
-    return { ok: true, artifact };
+    return { ok: true, artifact, relayed: Boolean(relayed) };
   });
 
   // PATCH /artifacts/:id/status — update artifact confidence lifecycle.

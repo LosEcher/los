@@ -218,6 +218,10 @@ test('artifact relay pushes to an executor and indexes the remote copy', async (
     assert.equal(read.statusCode, 200, read.body);
     assert.equal(read.body, content.toString('utf8'));
     assert.equal(received.some(item => item.method === 'GET' && item.url.endsWith(`/${artifactId}-relay-${nodeId}/content`)), true);
+    const deleted = await app.inject({ method: 'DELETE', url: `/artifacts/${artifactId}`, payload: { reason: 'relay cleanup' } });
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    const gone = await app.inject({ method: 'GET', url: `/artifacts/${artifactId}/content` });
+    assert.equal(gone.statusCode, 404);
   } finally {
     await getDb().query('DELETE FROM artifacts WHERE artifact_id = $1', [artifactId]).catch(() => undefined);
     await getDb().query('DELETE FROM artifact_relay_index WHERE artifact_id = $1', [artifactId]).catch(() => undefined);
