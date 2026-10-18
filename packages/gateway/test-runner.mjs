@@ -99,6 +99,7 @@ const isolatedDatabaseTestFiles = [
   'src/server-maintenance.test.ts',
   'src/session-routes.test.ts',
   'src/trace-routes.test.ts',
+  'src/trace-incremental.test.ts',
 ];
 
 runPackageTests({
