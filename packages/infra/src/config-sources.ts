@@ -46,6 +46,7 @@ const ENV_MAP: [string, string][] = [
   ['EXECUTOR_VERSION', 'executor.version'], ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['LOS_TASK_TOKEN_SECRET', 'executor.taskTokenSecret'],
   ['EXECUTOR_NODE_CREDENTIAL', 'executor.nodeCredential'],
+  ['EXECUTOR_NODE_CREDENTIAL_TTL_DAYS', 'executor.nodeCredentialTtlDays'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'], ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
   ['EXECUTOR_NODE_KIND', 'executor.nodeKind'], ['EXECUTOR_HOST', 'executor.host'],
   ['EXECUTOR_PORT', 'executor.port'], ['EXECUTOR_SHUTDOWN_GRACE_MS', 'executor.shutdownGraceMs'],

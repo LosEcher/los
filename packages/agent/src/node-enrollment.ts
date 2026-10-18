@@ -13,9 +13,20 @@ CREATE TABLE IF NOT EXISTS node_enrollments (
   node_id TEXT PRIMARY KEY,
   credential_hash TEXT NOT NULL UNIQUE,
   enrolled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ
 );
+ALTER TABLE node_enrollments ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 `;
+
+/**
+ * 凭据 TTLS（C.2 第 3 条）。
+ *
+ * 旧实现把 365 天只写在返回值里：`verifyNodeCredential` 从不读 `expires_at`，
+ * 于是"到期"只是一句声明。现在过期进入校验，且**存量行**按 `enrolled_at + 365d`
+ * 折算（它们签发时的承诺就是 365 天），新签发默认 30 天。
+ */
+const DEFAULT_CREDENTIAL_TTL_MS = 30 * 24 * 60 * 60_000;
 
 let initialized = false;
 
@@ -43,7 +54,7 @@ export async function issueNodeEnrollmentToken(nodeId: string, ttlMs = 15 * 60_0
   return { token, nodeId, expiresAt: expiresAt.toISOString() };
 }
 
-export async function redeemNodeEnrollmentToken(token: string, nodeId: string, ttlMs = 365 * 24 * 60 * 60_000): Promise<NodeCredential | null> {
+export async function redeemNodeEnrollmentToken(token: string, nodeId: string, ttlMs = DEFAULT_CREDENTIAL_TTL_MS): Promise<NodeCredential | null> {
   await ensureNodeEnrollmentStore();
   const credential = randomBytes(32).toString('base64url');
   const credentialHash = hashSecret(credential);
@@ -63,10 +74,14 @@ export async function redeemNodeEnrollmentToken(token: string, nodeId: string, t
         return null;
       }
       await client.query(
-        `INSERT INTO node_enrollments (node_id, credential_hash)
-         VALUES ($1, $2)
-         ON CONFLICT (node_id) DO UPDATE SET credential_hash = EXCLUDED.credential_hash, enrolled_at = now(), revoked_at = NULL`,
-        [nodeId, credentialHash],
+        `INSERT INTO node_enrollments (node_id, credential_hash, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (node_id) DO UPDATE
+           SET credential_hash = EXCLUDED.credential_hash,
+               enrolled_at = now(),
+               expires_at = EXCLUDED.expires_at,
+               revoked_at = NULL`,
+        [nodeId, credentialHash, expiresAt],
       );
       await client.query('COMMIT');
       return { nodeId, credential, expiresAt: expiresAt.toISOString() };
@@ -77,12 +92,22 @@ export async function redeemNodeEnrollmentToken(token: string, nodeId: string, t
   });
 }
 
-export async function verifyNodeCredential(credential: string): Promise<{ nodeId: string } | null> {
+export async function verifyNodeCredential(
+  credential: string,
+): Promise<{ nodeId: string; expiresAt: string } | null> {
   if (!credential) return null;
   await ensureNodeEnrollmentStore();
-  const result = await getDb().query<{ node_id: string }>(
-    'SELECT node_id FROM node_enrollments WHERE credential_hash = $1 AND revoked_at IS NULL',
+  // 存量行（expires_at IS NULL）按 365 天折算：它们签发时的承诺是 365 天，
+  // 不能用新默认值追溯缩短。过期在 SQL 里判定，避免时钟/序列化口径分叉。
+  const result = await getDb().query<{ node_id: string; expires_at: Date; expired: boolean }>(
+    `SELECT node_id,
+            COALESCE(expires_at, enrolled_at + interval '365 days') AS expires_at,
+            COALESCE(expires_at, enrolled_at + interval '365 days') <= now() AS expired
+     FROM node_enrollments
+     WHERE credential_hash = $1 AND revoked_at IS NULL`,
     [hashSecret(credential)],
   );
-  return result.rows[0] ? { nodeId: result.rows[0].node_id } : null;
+  const row = result.rows[0];
+  if (!row || row.expired) return null;
+  return { nodeId: row.node_id, expiresAt: new Date(row.expires_at).toISOString() };
 }

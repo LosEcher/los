@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { getConfig } from '@los/infra/config';
 import {
   appendNodeProbeEvent,
   ensureExecutorNodeStore,
@@ -36,6 +37,7 @@ import {
 import { requireOperator } from '../../request-context.js';
 import { parseBoundedIntegerParam } from '../server-helpers.js';
 import { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, verifyNodeCredential } from '@los/agent/node-enrollment';
+import { warnIfCredentialNearExpiry } from '../../node-credential-expiry.js';
 
 export type NodeRouteDependencies = {
   listExecutorNodes: typeof listExecutorNodes;
@@ -120,7 +122,8 @@ export function registerNodeRoutes(
     const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
     if (!token || !nodeId) return reply.status(400).send({ error: 'token and nodeId are required' });
     await ensureNodeEnrollmentStore();
-    const result = await redeemNodeEnrollmentToken(token, nodeId);
+    const ttlDays = getConfig().executor.nodeCredentialTtlDays;
+    const result = await redeemNodeEnrollmentToken(token, nodeId, ttlDays * 24 * 60 * 60_000);
     if (!result) return reply.status(401).send({ error: 'invalid, expired, consumed, or mismatched enrollment token' });
     return result;
   });
@@ -216,6 +219,7 @@ export function registerNodeRoutes(
       if (!enrollment || enrollment.nodeId !== nodeId) {
         return reply.status(401).send({ error: 'invalid node credential' });
       }
+      warnIfCredentialNearExpiry(nodeId, enrollment.expiresAt);
     }
 
     await deps.ensureExecutorNodeStore();

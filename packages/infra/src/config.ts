@@ -269,6 +269,12 @@ export const ConfigSchema = z.object({
      * gateway keeps accepting them (ADR 0048 B3 transition).
      */
     nodeCredential: z.string().optional(),
+    /**
+     * 节点凭据 TTL（天）。`POST /nodes/enroll` 签发时落库，`verifyNodeCredential`
+     * 过期即拒。默认 30 天（旧实现的 365 天只写在返回值里、从不校验）。
+     * 存量凭据按 `enrolled_at + 365d` 折算，不追溯缩短。
+     */
+    nodeCredentialTtlDays: z.coerce.number().int().min(1).max(365).default(30),
     nodeId: z.string().optional(),
     nodeUrl: z.string().optional(),
     nodeKind: z.string().optional(),
