@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { getConfig } from '@los/infra/config';
 import { registerTaskEventRoute } from './task-event-routes.js';
+import { registerTaskCompleteRoute } from './task-complete-routes.js';
 import { ensureTaskRunStore, heartbeatTaskRun, loadTaskRun, listTaskRuns, listTaskRunsByStatus, updateTaskRunFields } from '@los/agent/task-runs';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent, appendSessionEvents } from '@los/agent/session-events';
@@ -112,6 +113,7 @@ export function registerTaskRoutes(
   deps: TaskRouteDependencies = defaultDependencies,
 ): void {
   registerTaskEventRoute(app, deps);
+  registerTaskCompleteRoute(app);
   app.get('/tasks', async (req, reply) => {
     const query = req.query as { status?: string; projectId?: string; limit?: string };
     // limit 可选；缺省仍是 50（保持既有调用方行为），但不再固定死（同 `/nodes`）。

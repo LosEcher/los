@@ -124,6 +124,7 @@ export {
   updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
   claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
   previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
+  transitionScheduledWorkRun,
   type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
   type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
 } from './scheduled-work/index.js';

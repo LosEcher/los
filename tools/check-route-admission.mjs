@@ -88,6 +88,10 @@ export const SELF_AUTHENTICATED_PATHS = new Map([
     '`x-los-node-credential` 自证：用当前凭据换新凭据，旧值留 24h 重叠窗口（见 file:packages/agent/src/node-enrollment.ts:rotateNodeCredential）。',
   ],
   [
+    'POST /tasks/:id/complete',
+    '`x-los-task-token`（HMAC，绑定 taskRunId + leaseVersion + exp）；显式收敛 task run 与关联 scheduled run 的终态。',
+  ],
+  [
     'POST /tasks/:id/events',
     '`x-los-task-token`（HMAC，绑定 taskRunId + leaseVersion + exp）；sessionId/nodeId 取自 task run，clientEventId 保证重试幂等。',
   ],
