@@ -137,14 +137,19 @@ export async function verifyNodeCredential(
 }
 
 /**
- * 用**当前凭据**换一枚新凭据（节点自助，不需要 operator 发 enrollment token）。
+ * 用**当前凭据或重叠窗口内的旧凭据**换一枚新凭据（节点自助，不需要 operator 发 token）。
  *
  * 与 `POST /nodes/enroll` 的区别：enroll 是"用一次性 token 认领节点"（运营动作），
  * rotation 是"已入网节点在到期前换钥匙"（节点动作）。旧值不会立刻失效，而是进入
  * `NODE_CREDENTIAL_ROTATION_OVERLAP_MS` 的重叠窗口，覆盖"响应丢失/写盘失败"。
  *
- * 只接受**当前值**（不接受已经在 previous 槽里的值）：否则连续两次写盘失败会让
- * 状态机的代次无法收敛。写盘失败时旧值仍有 24h，运营可重新 enroll 兜底。
+ * 为什么也接受 previous：节点的状态文件可能随容器/临时盘一起丢，重启后只剩 `.env`
+ * 里的旧值；如果旧值此时在重叠窗口里，拒绝轮换会让它 24h 后必然掉线。允许从
+ * previous 轮换时，**previous 槽保持原值、窗口不延长**（只替换 active），于是重复
+ * 重启可以反复自愈，而不会把旧值变成一把永久钥匙。
+ *
+ * 代价：同一 nodeId 的多副本各自轮换会互相顶掉 active；节点凭据本就是"一节点一把"，
+ * 不做并发多凭据。
  */
 export async function rotateNodeCredential(
   currentCredential: string,
@@ -160,16 +165,24 @@ export async function rotateNodeCredential(
     try {
       const rotated = await client.query<{ node_id: string }>(
         `UPDATE node_enrollments
-         SET previous_credential_hash = credential_hash,
-             previous_valid_until = LEAST(
-               COALESCE(expires_at, enrolled_at + interval '365 days'),
-               now() + ($3::text || ' milliseconds')::interval
-             ),
+         SET previous_credential_hash =
+               CASE WHEN credential_hash = $1 THEN credential_hash ELSE previous_credential_hash END,
+             previous_valid_until =
+               CASE WHEN credential_hash = $1
+                    THEN LEAST(
+                      COALESCE(expires_at, enrolled_at + interval '365 days'),
+                      now() + ($3::text || ' milliseconds')::interval
+                    )
+                    ELSE previous_valid_until
+               END,
              credential_hash = $2,
              expires_at = $4
-         WHERE credential_hash = $1
-           AND revoked_at IS NULL
-           AND COALESCE(expires_at, enrolled_at + interval '365 days') > now()
+         WHERE revoked_at IS NULL
+           AND (
+             (credential_hash = $1
+              AND COALESCE(expires_at, enrolled_at + interval '365 days') > now())
+             OR (previous_credential_hash = $1 AND previous_valid_until > now())
+           )
          RETURNING node_id`,
         [hashSecret(currentCredential), hashSecret(credential), Math.max(1_000, overlapMs), expiresAt],
       );

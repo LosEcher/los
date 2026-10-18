@@ -353,14 +353,32 @@ test('node can rotate its own credential; the old value survives only the overla
     assert.equal(beat.json().credentialRotationDue, false);
     assert.equal(beat.json().credentialExpiresAt, body.expiresAt);
 
-    // Rotating again with the now-previous value is refused (only the active value may rotate).
-    const reRotateOld = await app.inject({
+    // A restarted node that lost its state file still holds the old value; while the
+    // overlap window is open it must be able to rotate again (self-heal). The old
+    // value stays in the previous slot and its window is NOT extended.
+    const windowBefore = await getDb().query<{ previous_valid_until: Date }>(
+      'SELECT previous_valid_until FROM node_enrollments WHERE node_id = $1', [nodeId],
+    );
+    const reRotated = await app.inject({
       method: 'POST',
       url: '/nodes/credential/rotate',
       headers: { 'x-los-node-credential': first!.credential },
       payload: {},
     });
-    assert.equal(reRotateOld.statusCode, 401);
+    assert.equal(reRotated.statusCode, 200);
+    const second = reRotated.json() as { credential: string; expiresAt: string };
+    assert.notEqual(second.credential, body.credential);
+    const windowAfter = await getDb().query<{ previous_valid_until: Date }>(
+      'SELECT previous_valid_until FROM node_enrollments WHERE node_id = $1', [nodeId],
+    );
+    assert.equal(
+      new Date(windowAfter.rows[0].previous_valid_until).toISOString(),
+      new Date(windowBefore.rows[0].previous_valid_until).toISOString(),
+      'rotating from the previous slot must not extend its window',
+    );
+    // The old value still authenticates; the newest value is the active one.
+    assert.equal((await verifyNodeCredential(first!.credential))?.nodeId, nodeId);
+    assert.equal((await verifyNodeCredential(second.credential))?.nodeId, nodeId);
 
     // Once the overlap window closes, the old value must stop authenticating.
     await getDb().query(
@@ -368,7 +386,16 @@ test('node can rotate its own credential; the old value survives only the overla
       [nodeId],
     );
     assert.equal(await verifyNodeCredential(first!.credential), null);
-    assert.equal((await verifyNodeCredential(body.credential))?.nodeId, nodeId);
+    assert.equal((await verifyNodeCredential(second.credential))?.nodeId, nodeId);
+
+    // And a value past the window cannot rotate either.
+    const reRotateExpired = await app.inject({
+      method: 'POST',
+      url: '/nodes/credential/rotate',
+      headers: { 'x-los-node-credential': first!.credential },
+      payload: {},
+    });
+    assert.equal(reRotateExpired.statusCode, 401);
   } finally {
     await app.close();
   }
