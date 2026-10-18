@@ -21,6 +21,7 @@ import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
+import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
 import {
   _renewAgentTaskLease,
   _renewTaskLease,
@@ -245,7 +246,10 @@ export async function startExecutor() {
 
       if (route.pathname.startsWith('/v1/artifacts')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
-        if (dbDisabled) { sendJson(res, 503, { error: 'artifact_store_unavailable_in_stateless_mode' }); return; }
+        if (dbDisabled) {
+          await handleStatelessArtifactRoute(req, res, route, nodeId, artifactStorageRoot, readJson, sendJson);
+          return;
+        }
         await handleArtifactRoute(req, res, route, nodeId, artifactStorageRoot);
         return;
       }
