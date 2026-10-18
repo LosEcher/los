@@ -22,7 +22,7 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
-import { GatewayEventSink } from './gateway-event-sink.js';
+import { GatewayEventSink, replayGatewayEventSpool } from './gateway-event-sink.js';
 import {
   _renewAgentTaskLease,
   _renewTaskLease,
@@ -42,10 +42,8 @@ import {
   readJson,
   sendJson,
 } from './executor-helpers.js';
-
 const log = getLogger('executor');
 const DEFAULT_LEASE_MS = 30_000;
-
 interface RunAgentRequest {
   taskRunId: string;
   nodeId?: string;
@@ -58,7 +56,6 @@ interface RunAgentRequest {
   taskToken?: string;
   config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
-
 type ExecutorStreamChunk =
   | { type: 'session_event'; event: SessionEventRecord }
   | { type: 'model_delta'; delta: AgentModelDelta }
@@ -66,7 +63,6 @@ type ExecutorStreamChunk =
   | { type: 'kernel_event'; kernelEvent: unknown }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
-
 export async function startExecutor() {
   const config = await loadConfig();
   const host = config.executor.host;
@@ -87,7 +83,6 @@ export async function startExecutor() {
   const heartbeatViaApi = !!gatewayUrl;
   const shutdownGraceMs = config.executor.shutdownGraceMs;
   const lifecycle = new ExecutorRuntimeLifecycle();
-
   const dbDisabled = config.executor.dbMode === 'none';
   if (dbDisabled) {
     if (!gatewayUrl) throw new Error('EXECUTOR_DB_MODE=none requires GATEWAY_URL');
@@ -98,7 +93,6 @@ export async function startExecutor() {
   } else {
     await initDb(config.databaseUrl);
   }
-
   // Run ordered migrations before ensureAllStores. Executor nodes (especially
   // remote ones with their own DB) must not rely on the gateway's
   // ensureAllStores — file_sync_* tables have no ensure*Store, so migration is
@@ -113,7 +107,6 @@ export async function startExecutor() {
       log.warn(`Executor migration errors: ${migrateResult.errors.join('; ')}`);
     }
   }
-
   // ensureAllAgentStores covers ALL agent-owned tables (27 stores).
   // This closes the bootstrap blind spot: remote executor nodes previously
   // only ensured 3 tables (executor_node, artifact, task_runs), leaving
@@ -121,8 +114,8 @@ export async function startExecutor() {
   // gateway, which is necessary because runAgent() touches run_specs,
   // session_events, tool_call_states, verification_records, etc.
   if (!dbDisabled) await ensureAllAgentStores();
-
   const nodeId = config.executor.nodeId ?? `node-${randomUUID()}`;
+  executorEventSpoolRoot = resolve(process.cwd(), '.los-runtime', 'executor-events', encodeURIComponent(nodeId));
   const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;
   const nodeKind: ExecutorNodeKind = (config.executor.nodeKind as ExecutorNodeKind) ?? 'executor';
   const baseConnectModes: ExecutorNodeConnectMode[] = ['agent_http', 'agent_http_ndjson'];
@@ -141,6 +134,15 @@ export async function startExecutor() {
   // 状态文件优先：轮换过的新值落在这里（`.los-runtime/executor/`，0600），
   // 不能只靠 .env —— 否则重启会退回旧值，而旧值可能已经过了重叠窗口。
   let nodeCredential = loadNodeCredential(nodeId, config.executor.nodeCredential);
+  if (dbDisabled && nodeCredential) {
+    void replayGatewayEventSpool({
+      spoolRoot: executorEventSpoolRoot,
+      gatewayUrl: gatewayUrl!,
+      nodeCredential,
+      nodeId,
+    }).then(sent => { if (sent > 0) log.info(`replayed ${sent} spooled event(s)`); })
+      .catch(err => log.warn(`event spool replay failed: ${err?.message ?? String(err)}`));
+  }
   let rotationInFlight = false;
   /** 轮换成功但落盘失败的新值；下一次心跳先补写。 */
   let pendingCredentialPersist: { credential: string; expiresAt?: string } | undefined;
@@ -399,7 +401,7 @@ async function runAssignedAgentTask(
       : undefined;
 
   const eventSink = eventPersistence === 'callback' && gatewayUrl
-    ? new GatewayEventSink({ gatewayUrl, taskRunId, getToken: () => leaseHttp?.taskToken })
+    ? new GatewayEventSink({ gatewayUrl, taskRunId, getToken: () => leaseHttp?.taskToken, spoolRoot: executorEventSpoolRoot })
     : undefined;
 
   const heartbeat = setInterval(() => {
@@ -429,9 +431,9 @@ async function runAssignedAgentTask(
       },
       signal: controller.signal,
       eventPersistence,
-      onSessionEvent: (event) => {
+      onSessionEvent: async (event) => {
         events.push(event);
-        eventSink?.enqueue(event);
+        await eventSink?.enqueue(event);
         emit?.({ type: 'session_event', event });
       },
       onModelDelta: (delta) => {
@@ -468,6 +470,7 @@ function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): str
 
 let activeExecutor: Awaited<ReturnType<typeof startExecutor>> | undefined;
 let activeEventBacklog = 0;
+let executorEventSpoolRoot: string | undefined;
 let shutdownRequested = false;
 
 import { pathToFileURL } from 'node:url';
