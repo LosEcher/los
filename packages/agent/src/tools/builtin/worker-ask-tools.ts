@@ -148,6 +148,7 @@ export function registerWorkerAskTools(registry: ToolRegistry, options: BuiltinT
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['worker:ask'],
     timeoutMs: 5_000,
@@ -184,6 +185,7 @@ export function registerWorkerAskTools(registry: ToolRegistry, options: BuiltinT
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['worker:escalate'],
     timeoutMs: 5_000,

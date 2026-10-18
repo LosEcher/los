@@ -84,6 +84,7 @@ export function registerPlanningSubmissionTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['run_contract:submit'],
     timeoutMs: 30_000,

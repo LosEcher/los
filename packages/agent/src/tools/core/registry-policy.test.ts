@@ -9,6 +9,7 @@ import {
   assertCapabilityDeclaration,
   checkCapability,
   evaluateApprovalGate,
+  evaluateScopeGate,
   normalizeCapability,
 } from './registry-policy.js';
 
@@ -35,7 +36,7 @@ test('approval gate blocks in enforce mode', () => {
 
 test('a declaration that gates a read-only tool fails at boot', () => {
   assert.throws(
-    () => assertCapabilityDeclaration('bad', capability({ needsApproval: true, sideEffect: false, permissions: ['workspace:read'] })),
+    () => assertCapabilityDeclaration('bad', capability({ scope: [], needsApproval: true, sideEffect: false, permissions: ['workspace:read'] })),
     /needsApproval requires sideEffect=true/,
   );
 });
@@ -61,10 +62,65 @@ test('registering a contradictory capability throws instead of storing it', () =
           parameters: { type: 'object', properties: {} },
         },
       },
-      { needsApproval: true, sideEffect: false, permissions: ['workspace:read'] },
+      { scope: [], needsApproval: true, sideEffect: false, permissions: ['workspace:read'] },
     ),
     /needsApproval requires sideEffect=true/,
   );
+});
+
+test('scope declaration must name a real parameter (A1b)', () => {
+  const def = {
+    type: 'function',
+    function: {
+      name: 'scoped_tool',
+      description: 'test',
+      parameters: { type: 'object', properties: { projectId: { type: 'string' } } },
+    },
+  } as const;
+  assert.doesNotThrow(() => assertCapabilityDeclaration('scoped_tool', capability({ scope: ['projectId'] }), def));
+  assert.throws(
+    () => assertCapabilityDeclaration('scoped_tool', capability({ scope: ['sessionId'] }), def),
+    /scope "sessionId" is not declared in parameters\.properties/,
+  );
+  assert.throws(
+    () => assertCapabilityDeclaration('scoped_tool', capability({ scope: ['bogus' as never] }), def),
+    /unknown scope id "bogus"/,
+  );
+  assert.throws(
+    () => assertCapabilityDeclaration('scoped_tool', capability({ scope: ['projectId', 'projectId'] }), def),
+    /duplicate scope id "projectId"/,
+  );
+});
+
+test('registering a scope that the schema does not expose fails at registration', () => {
+  const registry = createToolRegistry();
+  assert.throws(
+    () => registry.register(
+      'scoped_tool',
+      async () => ({ content: '' }),
+      {
+        type: 'function',
+        function: {
+          name: 'scoped_tool',
+          description: 'no projectId parameter',
+          parameters: { type: 'object', properties: { title: { type: 'string' } } },
+        },
+      },
+      { scope: ['projectId'] },
+    ),
+    /scope "projectId" is not declared/,
+  );
+});
+
+test('scope gate compares only ids the caller actually supplied', () => {
+  const cap = capability({ scope: ['projectId'] });
+  assert.deepEqual(evaluateScopeGate(cap, { projectId: 'other' }, { projectId: 'los' }), {
+    mismatch: { scopeId: 'projectId', requested: 'other', context: 'los' },
+  });
+  assert.equal(evaluateScopeGate(cap, { projectId: 'los' }, { projectId: 'los' }), null);
+  assert.equal(evaluateScopeGate(cap, {}, { projectId: 'los' }), null, 'omitted id defaults from context, not a violation');
+  assert.deepEqual(evaluateScopeGate(cap, { projectId: 'x' }, {}), { contextMissing: 'projectId', requested: 'x' });
+  assert.equal(evaluateScopeGate(capability({ scope: [] }), { projectId: 'x' }, { projectId: 'los' }), null);
 });
 
 test('every L2 builtin declares approval, a side effect, and a permission', async () => {

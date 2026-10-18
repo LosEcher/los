@@ -12,7 +12,7 @@ const REPRESENTATIVE_TYPES = [
   'model.response.truncated', 'model.cache', 'model.delta',
   'tool.call', 'tool.result', 'tool.catalog', 'tool.warned',
   'tool.requested', 'tool.repair', 'tool.planned', 'tool.preflight_diagnostic',
-  'tool.call.upsert', 'tool.approved', 'tool.denied',
+  'tool.call.upsert', 'tool.approved', 'tool.denied', 'tool.approval_required', 'tool.scope_mismatch',
   'task.created', 'task.running', 'task.succeeded', 'task.failed',
   'task.cancelled', 'task.blocked', 'task.recovery_followup_queued', 'task.deduplicated',
   'agent_task.failed', 'agent_task.requeued',

@@ -115,6 +115,7 @@ export function registerSqlQueryTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['db:read'],
     timeoutMs: QUERY_TIMEOUT_MS + 5_000,

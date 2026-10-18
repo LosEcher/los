@@ -12,7 +12,7 @@ import { preActionGate, type PreActionGateConfig } from './pre-action-gate.js';
 import { evaluateOperatorRuleGate } from './operator-rules-runtime.js';
 import type { PersistedToolResultEvidence } from './semantic-eviction.js';
 import type { ToolRegistry } from './tools/core/registry.js';
-import { evaluateApprovalGate, type ApprovalEnforcement } from './tools/core/registry-policy.js';
+import { evaluateApprovalGate, evaluateScopeGate, type ApprovalEnforcement } from './tools/core/registry-policy.js';
 
 type EmitEvent = (event: Record<string, unknown>) => Promise<{ id?: number } | undefined>;
 type SessionErrorRecord = { turn: number; type: string; toolName?: string; message: string };
@@ -90,6 +90,34 @@ async function executeBrokeredTool(
       source: toolSource,
     },
   });
+
+  // Scope 读取点（Slice 1：warn-only）。声明了 scope 的工具，如果参数里给了与当前
+  // run 上下文不一致的 id，就把这件事变成**事件**；不拒（切 deny 是单独的行为变更）。
+  const scopeCheck = evaluateScopeGate(capability ?? undefined, request.arguments, {
+    tenantId: config.tenantId,
+    projectId: config.projectId,
+    runSpecId: config.runSpecId,
+    sessionId: config.sessionId,
+    taskRunId: config.taskRunId,
+  });
+  if (scopeCheck) {
+    const isMismatch = 'mismatch' in scopeCheck;
+    await emitEvent({
+      type: 'tool.scope_mismatch',
+      turn: request.turn,
+      toolName: request.name,
+      parentEventId: planEvent?.id ?? callEvent?.id,
+      payload: {
+        callId: request.callId,
+        mode: 'warn',
+        scopeId: isMismatch ? scopeCheck.mismatch.scopeId : scopeCheck.contextMissing,
+        requested: isMismatch ? scopeCheck.mismatch.requested : scopeCheck.requested,
+        ...(isMismatch
+          ? { context: scopeCheck.mismatch.context }
+          : { contextMissing: true }),
+      },
+    });
+  }
 
   let decision = applyPhaseGate(
     tools.evaluateTool(request.name), request.name, config.runContractMetadata,

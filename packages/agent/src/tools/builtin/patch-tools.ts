@@ -52,6 +52,7 @@ export function registerPatchTools(registry: ToolRegistry, options: PatchToolOpt
       parameters: patchParameters(),
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,
@@ -70,6 +71,7 @@ export function registerPatchTools(registry: ToolRegistry, options: PatchToolOpt
       parameters: patchParameters(),
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 60_000,
@@ -88,6 +90,7 @@ export function registerPatchTools(registry: ToolRegistry, options: PatchToolOpt
       parameters: patchParameters(),
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 60_000,

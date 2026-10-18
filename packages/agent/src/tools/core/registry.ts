@@ -45,6 +45,7 @@ import {
 import type {
   BuiltinToolOptions,
   ToolCapability,
+  ToolCapabilityInput,
   ToolExecutionDecision,
   ToolHandler,
   ToolInput,
@@ -59,6 +60,7 @@ export { READ_ONLY_BUILTIN_TOOLS } from './registry-policy.js';
 export type {
   BuiltinToolOptions,
   ToolCapability,
+  ToolCapabilityInput,
   ToolCostLevel,
   ToolExecutionDecision,
   ToolExecutionPolicy,
@@ -84,7 +86,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   const isAllowed = (name: string) => allowedTools === null || allowedTools.has(name);
 
   return {
-    register(name: string, handler: ToolHandler, def: ToolDef, capability?: Partial<ToolCapability>) {
+    register(name: string, handler: ToolHandler, def: ToolDef, capability: ToolCapabilityInput) {
       if (!isAllowed(name)) {
         log.debug(`Skipped tool by policy: ${name}`);
         return;
@@ -92,7 +94,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
       handlers.set(name, handler);
       definitions.set(name, def);
       const normalized = normalizeCapability(name, capability);
-      assertCapabilityDeclaration(name, normalized);
+      assertCapabilityDeclaration(name, normalized, def);
       capabilities.set(name, normalized);
       log.debug(`Registered tool: ${name}`);
     },
@@ -207,6 +209,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,
@@ -238,6 +241,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 60_000,
@@ -284,6 +288,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L2',
     permissions: ['workspace:shell'],
     timeoutMs: 300_000,
@@ -350,6 +355,7 @@ export async function registerBuiltinTools(
         },
       },
     }, {
+      scope: [],
       riskLevel: 'L2',
       permissions: ['node:execute'],
       timeoutMs: 300_000,
@@ -412,6 +418,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:read'],
     timeoutMs: 130_000,
@@ -461,6 +468,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L2',
     permissions: ['runtime:spawn'],
     timeoutMs: 1_800_000,
@@ -500,6 +508,7 @@ export async function registerBuiltinTools(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,
@@ -588,6 +597,7 @@ export async function registerBuiltinTools(
           },
         },
         {
+          scope: [],
           riskLevel: toolPolicy.riskLevel,
           permissions: ['mcp:external'],
           timeoutMs: 60_000,

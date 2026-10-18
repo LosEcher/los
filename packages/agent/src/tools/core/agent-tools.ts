@@ -279,6 +279,7 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
       },
     },
   }, {
+    scope: [],
     // L1: read-only parents (maxRiskLevel L0) cannot spawn. Children never
     // receive spawn_agent, so they cannot widen tools.
     riskLevel: 'L1',
@@ -356,6 +357,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:query'],
     timeoutMs: 5_000,
@@ -390,6 +392,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:kill'],
     timeoutMs: 5_000,
@@ -424,6 +427,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       parameters: { type: 'object', properties: {} },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:list'],
     timeoutMs: 5_000,

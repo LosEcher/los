@@ -116,6 +116,7 @@ const sharedProcessTestFiles = [
   'src/tools/external/mcp-client.test.ts',
   'src/tools/registry.test.ts',
   'src/los-tool-broker-approval.test.ts',
+  'src/los-tool-broker-scope.test.ts',
   'src/tools/core/registry-policy.test.ts',
   'src/runtime-env.test.ts',
 ];

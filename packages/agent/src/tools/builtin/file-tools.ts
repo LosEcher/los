@@ -63,6 +63,7 @@ export function registerGetFileInfoTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 10_000,
@@ -112,6 +113,7 @@ export function registerDeleteFileTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 10_000,
@@ -156,6 +158,7 @@ export function registerCreateDirectoryTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 10_000,
@@ -217,6 +220,7 @@ export function registerCopyFileTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 30_000,
@@ -276,6 +280,7 @@ export function registerMoveFileTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 30_000,

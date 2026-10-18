@@ -42,6 +42,8 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'tool.denied',
     'tool.preflight_diagnostic',
     'tool.call.upsert',
+    'tool.approval_required',
+    'tool.scope_mismatch',
   ],
   task: [
     'task.created',

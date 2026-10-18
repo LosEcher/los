@@ -16,6 +16,7 @@ import { getLogger } from '@los/infra/logger';
 import type { ToolDef } from '../../providers/index.js';
 import type {
   ToolCapability,
+  ToolCapabilityInput,
   ToolExecutionDecision,
   ToolExecutionPolicy,
   ToolHandler,
@@ -38,7 +39,7 @@ export interface DeferredToolEntry {
   /** Handler — null until first invocation */
   handler: ToolHandler | null;
   /** Capability */
-  capability: Partial<ToolCapability> | null;
+  capability: ToolCapabilityInput | null;
 }
 
 export interface DeferredRegistryOptions {
@@ -85,7 +86,7 @@ export function createDeferredRegistry(
       name: string,
       handler: ToolHandler,
       def: ToolDef,
-      capability?: Partial<ToolCapability>,
+      capability: ToolCapabilityInput,
     ) {
       const desc = def.function?.description ?? '';
       entries.set(name, {
@@ -108,8 +109,8 @@ export function createDeferredRegistry(
     async execute(input: ToolInput): Promise<ToolResult> {
       // Materialize on first invocation
       const entry = entries.get(input.name);
-      if (entry && !entry.materialized && entry.fullDef && entry.handler) {
-        inner.register(input.name, entry.handler, entry.fullDef, entry.capability ?? undefined);
+      if (entry && !entry.materialized && entry.fullDef && entry.handler && entry.capability) {
+        inner.register(input.name, entry.handler, entry.fullDef, entry.capability);
         entry.materialized = true;
         log.debug(`Materialized deferred tool: ${input.name}`);
       }
@@ -128,7 +129,7 @@ export function createDeferredRegistry(
       if (entries.has(name)) {
         return {
           allowed: true,
-          capability: { name, riskLevel: 'L0', permissions: [], timeoutMs: 30000, retryable: false, idempotent: false, costLevel: 'low', sideEffect: false, tags: [], sandboxRequired: false, needsApproval: false, parallelizable: true },
+          capability: { name, scope: [], riskLevel: 'L0', permissions: [], timeoutMs: 30000, retryable: false, idempotent: false, costLevel: 'low', sideEffect: false, tags: [], sandboxRequired: false, needsApproval: false, parallelizable: true },
           policy: {},
         };
       }

@@ -30,10 +30,28 @@ export type ToolExecutionReasonCode =
   | 'phase_blocked'
   | 'operator_rule_block';
 
+/**
+ * 工具可以触达的**上下文 id**（scope 闭集）。
+ *
+ * 只收"运行时上下文里已有权威值"的 id：broker 才能拿参数值与之比对。
+ * `agentId`/`todoId`/`jobId` 这类资源 id 不在其中——上下文不持有它们，
+ * 拿什么比对就只能靠猜，那会变成假校验。
+ */
+export type ScopeId = 'tenantId' | 'projectId' | 'runSpecId' | 'sessionId' | 'taskRunId';
+
+const SCOPE_IDS: readonly ScopeId[] = ['tenantId', 'projectId', 'runSpecId', 'sessionId', 'taskRunId'];
+
 export interface ToolCapability {
   name: string;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  /**
+   * 该工具触达哪些上下文 id（必填，可为空数组）。
+   *
+   * 声明后 broker 会把**参数里出现的值**与当前 run 的上下文比对；
+   * `[]` 表示"不触达任何上下文 id"，必须显式写出（不允许缺省）。
+   */
+  scope: readonly ScopeId[];
   permissions: string[];
   riskLevel: ToolRiskLevel;
   timeoutMs: number;
@@ -49,6 +67,9 @@ export interface ToolCapability {
   parallelizable: boolean;
   tags: string[];
 }
+
+/** 注册入参：scope 是唯一必填的能力字段（其余保留默认值语义）。 */
+export type ToolCapabilityInput = Partial<ToolCapability> & { scope: readonly ScopeId[] };
 
 export interface ToolRegistryOptions {
   allowedTools?: readonly string[];
@@ -124,7 +145,7 @@ export type ToolExecutionDecision =
     };
 
 export interface ToolRegistry {
-  register(name: string, handler: ToolHandler, def: ToolDef, capability?: Partial<ToolCapability>): void;
+  register(name: string, handler: ToolHandler, def: ToolDef, capability: ToolCapabilityInput): void;
   execute(input: ToolInput): Promise<ToolResult>;
   evaluateTool(name: string): ToolExecutionDecision;
   getDefinitions(): ToolDef[];
@@ -182,8 +203,16 @@ export function evaluateApprovalGate(
  * without a side effect (or without any permission) is a contradiction: the
  * approval gate would either never fire or fire for a read. Fail at boot so the
  * declaration cannot drift back into being decorative.
+ *
+ * Scope 的判据是"声明的 id 必须真的在参数表里"（存在即可，**不要求 required**）：
+ * todo/project 这些 id 是"可选覆盖、缺省取上下文"的字段，强行 required 会改变
+ * 模型契约；但声明一个参数表里根本没有的 id，仍然是假声明，必须启动失败。
  */
-export function assertCapabilityDeclaration(name: string, capability: ToolCapability): void {
+export function assertCapabilityDeclaration(
+  name: string,
+  capability: ToolCapability,
+  def?: { function?: { parameters?: { properties?: Record<string, unknown> } } },
+): void {
   if (capability.needsApproval && !capability.sideEffect) {
     throw new Error(
       `Tool ${name}: needsApproval requires sideEffect=true (declared capability would gate a read-only tool)`,
@@ -191,6 +220,23 @@ export function assertCapabilityDeclaration(name: string, capability: ToolCapabi
   }
   if (capability.needsApproval && capability.permissions.length === 0) {
     throw new Error(`Tool ${name}: needsApproval requires at least one permission (nothing to audit)`);
+  }
+  const seen = new Set<string>();
+  for (const scopeId of capability.scope) {
+    if (!SCOPE_IDS.includes(scopeId)) {
+      throw new Error(`Tool ${name}: unknown scope id "${scopeId}" (allowed: ${SCOPE_IDS.join(', ')})`);
+    }
+    if (seen.has(scopeId)) {
+      throw new Error(`Tool ${name}: duplicate scope id "${scopeId}"`);
+    }
+    seen.add(scopeId);
+    const properties = def?.function?.parameters?.properties ?? {};
+    if (!(scopeId in properties)) {
+      throw new Error(
+        `Tool ${name}: scope "${scopeId}" is not declared in parameters.properties (declaration would never be read)`,
+      );
+    }
+
   }
 }
 
@@ -200,6 +246,7 @@ export function normalizeCapability(name: string, capability: Partial<ToolCapabi
     name,
     inputSchema: capability.inputSchema,
     outputSchema: capability.outputSchema,
+    scope: capability.scope ?? [],
     permissions: capability.permissions ?? [],
     riskLevel,
     timeoutMs: capability.timeoutMs ?? defaultTimeoutForRisk(riskLevel),
@@ -212,6 +259,42 @@ export function normalizeCapability(name: string, capability: Partial<ToolCapabi
     needsApproval: capability.needsApproval ?? riskLevel === 'L2',
     tags: capability.tags ?? [],
   };
+}
+
+export interface ScopeContext {
+  tenantId?: string;
+  projectId?: string;
+  runSpecId?: string;
+  sessionId?: string;
+  taskRunId?: string;
+}
+
+export interface ScopeMismatch {
+  scopeId: ScopeId;
+  requested: string;
+  context: string;
+}
+
+/**
+ * scope 的**读取点**（Slice 1：warn，不拒）。
+ *
+ * 只比对"参数里真的给了值"的 id：这些字段缺省时由下游从上下文补齐，不是越权。
+ * 上下文没有该 id 时也不判（无法证明越权）；这正是 warn 档要观察的灰区，
+ * 切 deny 前应按事件里的 `contextMissing` 决定是否收紧。
+ */
+export function evaluateScopeGate(
+  capability: ToolCapability | undefined,
+  args: Record<string, unknown>,
+  context: ScopeContext,
+): { mismatch: ScopeMismatch } | { contextMissing: ScopeId; requested: string } | null {
+  for (const scopeId of capability?.scope ?? []) {
+    const requested = args[scopeId];
+    if (typeof requested !== 'string' || !requested.trim()) continue;
+    const expected = context[scopeId];
+    if (!expected) return { contextMissing: scopeId, requested };
+    if (requested !== expected) return { mismatch: { scopeId, requested, context: expected } };
+  }
+  return null;
 }
 
 export function checkCapability(  capability: ToolCapability | undefined,

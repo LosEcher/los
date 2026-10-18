@@ -55,6 +55,7 @@ function mockRegistry(
       return tools.map(t => ({
         name: t.name,
         inputSchema: {},
+        scope: [],
         permissions: [],
         riskLevel: 'L0' as const,
         timeoutMs: 10_000,

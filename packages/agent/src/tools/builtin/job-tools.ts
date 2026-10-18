@@ -139,6 +139,7 @@ export function registerRunBackgroundTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L2',
     permissions: ['workspace:shell'],
     timeoutMs: 10_000,
@@ -198,6 +199,7 @@ export function registerJobOutputTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 10_000,
@@ -250,6 +252,7 @@ export function registerStopJobTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:shell'],
     timeoutMs: 10_000,
@@ -291,6 +294,7 @@ export function registerListJobsTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 5_000,

@@ -58,6 +58,7 @@ export function registerDirectoryTreeTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,
