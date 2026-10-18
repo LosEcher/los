@@ -45,7 +45,6 @@ export function sessionEventVisibility(type: string): SessionEventVisibility {
   }
   return 'public';
 }
-
 export interface ListSessionEventsOptions {
   /** When false, omit internal-tier rows. Default true (full ledger for tests/SSE). */
   includeInternal?: boolean;
@@ -256,6 +255,7 @@ export async function appendSessionEvent(
       JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
       parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
+      input.clientEventId ?? null,
   ];
   const rows = options.client
     ? await options.client.query<SessionEventRow>(sql, params)
