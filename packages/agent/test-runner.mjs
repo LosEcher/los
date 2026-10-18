@@ -115,6 +115,8 @@ const sharedProcessTestFiles = [
   'src/tools/builtin/worker-ask-tools.test.ts',
   'src/tools/external/mcp-client.test.ts',
   'src/tools/registry.test.ts',
+  'src/los-tool-broker-approval.test.ts',
+  'src/tools/core/registry-policy.test.ts',
 ];
 
 // Full isolated classification always includes every group so local

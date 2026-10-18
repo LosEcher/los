@@ -12,6 +12,7 @@ import { preActionGate, type PreActionGateConfig } from './pre-action-gate.js';
 import { evaluateOperatorRuleGate } from './operator-rules-runtime.js';
 import type { PersistedToolResultEvidence } from './semantic-eviction.js';
 import type { ToolRegistry } from './tools/core/registry.js';
+import { evaluateApprovalGate, type ApprovalEnforcement } from './tools/core/registry-policy.js';
 
 type EmitEvent = (event: Record<string, unknown>) => Promise<{ id?: number } | undefined>;
 type SessionErrorRecord = { turn: number; type: string; toolName?: string; message: string };
@@ -34,6 +35,8 @@ export function createLosToolBroker(input: {
   emitEvent: EmitEvent;
   onSessionError: (error: SessionErrorRecord) => void;
   preActionGateConfig?: PreActionGateConfig;
+  /** Approval enforcement for `needsApproval` tools. Defaults to warn. */
+  approvalEnforcement?: ApprovalEnforcement;
 }): LosToolBroker {
   return {
     isParallelizable: name => input.tools.getCapability(name)?.parallelizable === true,
@@ -169,6 +172,41 @@ async function executeBrokeredTool(
           reason: ruleDecision.reason,
         },
       });
+    }
+  }
+
+  // Approval gate. `needsApproval` is declared by four tools (run_shell,
+  // run_remote_command, run_runtime_task, the background shell) and used to be
+  // serialized into events without a decision point. Warn by default; switch
+  // to block with LOS_TOOL_APPROVAL_ENFORCEMENT=block once the warn events show
+  // nobody relies on the missing channel.
+  if (decision.allowed) {
+    const enforcement: ApprovalEnforcement =
+      context.approvalEnforcement
+      ?? (process.env.LOS_TOOL_APPROVAL_ENFORCEMENT === 'block' ? 'block' : 'warn');
+    const gate = evaluateApprovalGate(decision.capability, enforcement);
+    if (gate.action !== 'allow') {
+      await emitEvent({
+        type: 'tool.approval_required',
+        turn: request.turn,
+        toolName: request.name,
+        parentEventId: planEvent?.id ?? callEvent?.id,
+        payload: {
+          callId: request.callId,
+          action: gate.action,
+          enforcementMode: enforcement,
+          reason: gate.reason,
+        },
+      });
+      if (gate.action === 'block' && decision.allowed) {
+        decision = {
+          allowed: false,
+          reasonCode: 'tool_approval_required',
+          reason: gate.reason ?? 'tool requires approval',
+          capability: decision.capability,
+          policy: decision.policy,
+        };
+      }
     }
   }
 

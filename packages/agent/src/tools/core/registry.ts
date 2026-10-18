@@ -37,6 +37,7 @@ import { registerJobTools } from '../builtin/job-tools.js';
 import { registerWorkerAskTools } from '../builtin/worker-ask-tools.js';
 import {
   READ_ONLY_BUILTIN_TOOLS,
+  assertCapabilityDeclaration,
   checkCapability,
   executeWithRetry,
   normalizeCapability,
@@ -90,7 +91,9 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
       }
       handlers.set(name, handler);
       definitions.set(name, def);
-      capabilities.set(name, normalizeCapability(name, capability));
+      const normalized = normalizeCapability(name, capability);
+      assertCapabilityDeclaration(name, normalized);
+      capabilities.set(name, normalized);
       log.debug(`Registered tool: ${name}`);
     },
 

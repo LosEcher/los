@@ -25,6 +25,7 @@ export type ToolExecutionReasonCode =
   | 'tool_risk_exceeded'
   | 'tool_writes_disabled'
   | 'tool_sandbox_required'
+  | 'tool_approval_required'
   | 'phase_blocked'
   | 'operator_rule_block';
 
@@ -150,6 +151,46 @@ export const READ_ONLY_BUILTIN_TOOLS = [
   'run_node_probe',
 ] as const;
 
+export type ApprovalEnforcement = 'warn' | 'block';
+
+export interface ApprovalGateDecision {
+  action: 'allow' | 'warn' | 'block';
+  reason?: string;
+}
+
+/**
+ * `needsApproval` used to be metadata only: it was serialized into audit
+ * events and never consulted by a decision. This gate is that decision point.
+ * The default is `warn` so an existing deployment keeps its behaviour while
+ * the event makes the gap observable; `block` refuses the call outright
+ * (fail-closed: no approval channel means no execution).
+ */
+export function evaluateApprovalGate(
+  capability: ToolCapability | undefined,
+  enforcement: ApprovalEnforcement,
+): ApprovalGateDecision {
+  if (!capability?.needsApproval) return { action: 'allow' };
+  const reason = `Tool requires approval but no approval channel is wired: ${capability.name}`;
+  return enforcement === 'block' ? { action: 'block', reason } : { action: 'warn', reason };
+}
+
+/**
+ * Registration-time declaration check. A capability that claims `needsApproval`
+ * without a side effect (or without any permission) is a contradiction: the
+ * approval gate would either never fire or fire for a read. Fail at boot so the
+ * declaration cannot drift back into being decorative.
+ */
+export function assertCapabilityDeclaration(name: string, capability: ToolCapability): void {
+  if (capability.needsApproval && !capability.sideEffect) {
+    throw new Error(
+      `Tool ${name}: needsApproval requires sideEffect=true (declared capability would gate a read-only tool)`,
+    );
+  }
+  if (capability.needsApproval && capability.permissions.length === 0) {
+    throw new Error(`Tool ${name}: needsApproval requires at least one permission (nothing to audit)`);
+  }
+}
+
 export function normalizeCapability(name: string, capability: Partial<ToolCapability> = {}): ToolCapability {
   const riskLevel = capability.riskLevel ?? 'L1';
   return {
@@ -170,8 +211,7 @@ export function normalizeCapability(name: string, capability: Partial<ToolCapabi
   };
 }
 
-export function checkCapability(
-  capability: ToolCapability | undefined,
+export function checkCapability(  capability: ToolCapability | undefined,
   policy: ToolExecutionPolicy,
 ): { allowed: true; capability: ToolCapability } | { allowed: false; reasonCode: ToolExecutionReasonCode; reason: string } {
   if (!capability) {
