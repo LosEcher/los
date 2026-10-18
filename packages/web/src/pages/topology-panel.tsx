@@ -32,6 +32,15 @@ export interface RuntimeEvidenceEdge {
   label?: string;
 }
 
+/** `GET /runs/:id/inspect` 里 state 投影的**落点事实**（观测面；口径见后端 run-state-vocabulary） */
+export interface RunPlacementFacts {
+  nodeIds?: string[];
+  providers?: string[];
+  models?: string[];
+  workspaceRoots?: string[];
+  taskRunsWithoutNode?: number;
+}
+
 export interface RuntimeEvidenceGraph {
   runSpecId: string;
   sessionId: string;
@@ -100,7 +109,7 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
 
   const query = useQuery({
     queryKey: ['run-topology', runSpecId],
-    queryFn: () => getJson<RuntimeEvidenceGraph & { state?: Record<string, unknown> }>(
+    queryFn: () => getJson<RuntimeEvidenceGraph & { state?: { placement?: RunPlacementFacts } }>(
       `/runs/${encodeURIComponent(runSpecId!)}/inspect`,
     ),
     enabled: Boolean(runSpecId),
@@ -155,6 +164,7 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
     : layout?.nodes.find(node => node.id === selectedId) ?? null;
 
   const counts = query.data?.counts ?? {};
+  const placement: RunPlacementFacts | null = query.data?.state?.placement ?? null;
   const collapsedCount = (counts.session_event ?? 0) + (counts.tool_call_state ?? 0)
     + (counts.verification_record ?? 0);
 
@@ -171,6 +181,20 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
               nodes: String(layout?.nodes.length ?? 0),
               edges: String(layout?.edges.length ?? 0),
             })}
+          </span>
+        ) : null}
+        {/* 落点事实：把 B 层证据图接到 A 层机队（谁跑的 / 用哪家模型 / 工作区在哪）。
+            口径只读服务端投影的 `state.placement`（观测面），前端不重算、不归一化。 */}
+        {placement ? (
+          <span className="topology-placement" title={(placement.workspaceRoots ?? []).join('\n')}>
+            {placement.nodeIds && placement.nodeIds.length > 0
+              ? t('assets.topology.placement', {
+                nodes: placement.nodeIds.join(', '),
+                providers: (placement.providers ?? []).join(', ') || '—',
+              })
+              : t('assets.topology.placementMissing', {
+                count: String(placement.taskRunsWithoutNode ?? 0),
+              })}
           </span>
         ) : null}
       </div>
