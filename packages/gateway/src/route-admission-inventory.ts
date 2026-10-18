@@ -170,6 +170,7 @@ export function admissionRouteKeys(): readonly string[] {
     'POST /api/integrations/feed-analysis/dispatch',
     'POST /api/integrations/feed-analysis/dispatch/:id/cancel',
     'POST /artifacts',
+    'POST /artifacts/:id/relay',
     'POST /auth/login',
     'POST /auth/register',
     'POST /chat',
