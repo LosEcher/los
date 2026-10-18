@@ -21,7 +21,8 @@ import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
-import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
+import { executorArtifactStorageRoot, handleStatelessArtifactRoute } from './stateless-artifact-store.js';
+import { executionModeForExecutor } from './execution-mode.js';
 import { GatewayEventSink, countEventSpool, replayGatewayEventSpool } from './gateway-event-sink.js';
 import { postTaskCompletion } from './task-completion.js';
 import {
@@ -268,10 +269,10 @@ export async function startExecutor() {
         try {
           const body = await readJson<RunAgentRequest>(req);
           if (acceptsNdjson(req)) {
-            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db');
+            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db', dbDisabled);
             return;
           }
-          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db');
+          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller, gatewayUrl, taskTokenMode, dbDisabled ? 'callback' : 'db', dbDisabled);
           sendJson(res, 200, result);
           return;
         } finally {
@@ -332,6 +333,7 @@ async function streamAssignedAgentTask(
   gatewayUrl?: string,
   taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
   eventPersistence: 'db' | 'callback' = 'db',
+  stateless = false,
 ): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson',
@@ -345,7 +347,7 @@ async function streamAssignedAgentTask(
   };
 
   try {
-    await runAssignedAgentTask(body, nodeId, emit, controller, gatewayUrl, taskTokenMode, eventPersistence);
+    await runAssignedAgentTask(body, nodeId, emit, controller, gatewayUrl, taskTokenMode, eventPersistence, stateless);
   } catch (err: any) {
     emit({ type: 'error', error: err?.message ?? String(err) });
   } finally {
@@ -361,6 +363,7 @@ async function runAssignedAgentTask(
   gatewayUrl?: string,
   taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
   eventPersistence: 'db' | 'callback' = 'db',
+  stateless = false,
 ) {
   const taskRunId = normalizeRequiredString(body.taskRunId, 'taskRunId');
   const prompt = normalizeRequiredString(body.prompt, 'prompt');
@@ -418,6 +421,7 @@ async function runAssignedAgentTask(
     const executionKernel = resolveExecutionKernel(body.executionKernelKind);
     const result = await executionKernel.run(prompt, {
       ...(body.config ?? {}),
+      executionMode: executionModeForExecutor(stateless),
       identity: body.config?.identity ?? {
         name: 'default',
         level: resolveIdentityLevelForExecutionPath('remote-executor'),
@@ -462,11 +466,6 @@ async function runAssignedAgentTask(
 function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boolean {
   if (!agentKey) return false;
   return req.headers.authorization === `Bearer ${agentKey}`;
-}
-
-function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): string {
-  if (artifactRoot) return resolve(artifactRoot);
-  return resolve(process.cwd(), '.los-runtime', 'executor-artifacts', encodeURIComponent(nodeId));
 }
 
 let activeExecutor: Awaited<ReturnType<typeof startExecutor>> | undefined;

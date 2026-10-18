@@ -124,10 +124,12 @@ export {
   updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
   claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
   previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
-  transitionScheduledWorkRun,
+  transitionScheduledWorkRun, recordScheduledRunOutcome,
+  attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
   type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
 } from './scheduled-work/index.js';
+export { createScheduleResultWorkItem } from './scheduled-work/result-work-item.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, listNodeCommandNames, isNodeCommandName, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureFleetRepairConfigStore } from './fleet-repair-config.js';

@@ -29,6 +29,13 @@ export interface AgentConfig {
   taskRunId?: string;
   /** `callback` skips DB writes and lets the caller persist/forward events. */
   eventPersistence?: 'db' | 'callback';
+  /**
+   * Execution channel. `stateless` is a remote no-DB executor with no
+   * interactive approval channel: needsApproval tools are blocked by default
+   * (fail-closed). `interactive` keeps the warn-by-default observation mode.
+   * Set by the executor from EXECUTOR_DB_MODE; not a user-facing flag.
+   */
+  executionMode?: 'interactive' | 'stateless';
   /** Dispatch ID (= agent_task_attempts.id) for the current graph-path execution.
    *  Used as the worker_messages.dispatch_id so the coordinator can scope messages
    *  to a specific dispatch. Undefined for non-graph (direct scheduled) tasks. */

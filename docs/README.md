@@ -126,6 +126,11 @@ replaced it, the real-call outcomes wired into scoring, the executor's two compe
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
 
+Use `operations/2026-10-19-b2-approval-and-convergence-hardening.md` for the
+B2 follow-up that closed ADR 0050's three gaps: stateless approval now forces
+`block`, the orphan sweep covers succeeded tasks, completion signals
+`scheduledConvergencePending`, and reaper run_spec failures are logged.
+
 Use `operations/2026-10-18-p4-fail-closed-evidence.md` for the P4 decision
 evidence: the acceptance criteria, node34 health and backlog, the zero
 running/claimed scheduled-run count, and the reaper/orphan convergence rows

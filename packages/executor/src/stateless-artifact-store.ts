@@ -19,6 +19,12 @@ interface StatelessArtifact {
   createdAt: string;
 }
 
+/** Root for a node's local artifact CAS (default `.los-runtime/executor-artifacts/<nodeId>`). */
+export function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): string {
+  if (artifactRoot) return resolve(artifactRoot);
+  return resolve(process.cwd(), '.los-runtime', 'executor-artifacts', encodeURIComponent(nodeId));
+}
+
 /**
  * File-backed artifact store for `EXECUTOR_DB_MODE=none`.
  *

@@ -2,7 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { loadTaskRun, updateTaskRunFields } from '@los/agent/task-runs';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import {
+  attachScheduleRecoveryWorkItem,
+  attachScheduledRunWorkItem,
+  createScheduleResultWorkItem,
   loadScheduledWorkItemRun,
+  recordScheduledRunOutcome,
   transitionScheduledWorkRun,
 } from '@los/agent';
 import {
@@ -23,6 +27,48 @@ function terminal(status: string): boolean {
  * Scheduled runs linked through `metadata.scheduledWork.runId` are converged in
  * the same request.
  */
+
+/**
+ * Converge a linked scheduled run after a task reached a terminal status.
+ * Exported so the route-first path (no-DB executor posts /complete before the
+ * scheduled runner resumes) can be tested without booting Fastify.
+ *
+ * Returns the run's status (existing terminal status, or the target), or
+ * undefined when there is no linked run.
+ */
+export async function _convergeScheduledRunForCompletion(
+  scheduledRunId: string,
+  target: 'succeeded' | 'failed',
+  convergenceError?: string,
+  result?: Record<string, unknown>,
+): Promise<string | undefined> {
+  const run = await loadScheduledWorkItemRun(scheduledRunId);
+  if (!run) return undefined;
+  if (terminal(run.status)) return run.status;
+  await transitionScheduledWorkRun(scheduledRunId, target, {
+    error: convergenceError,
+    resultSummary: result,
+  });
+  // The completion route is the terminalizing writer in the no-DB path; the
+  // scheduled runner's later transition loses the race and returns without
+  // recording the outcome. Record it here so schedule counters/circuit stay
+  // correct.
+  const outcome = await recordScheduledRunOutcome({
+    scheduleId: run.scheduleId,
+    status: target,
+  });
+  if (target === 'failed' && outcome.circuitOpened) {
+    const workItemId = await createScheduleResultWorkItem(outcome.schedule, run, 'failed', {
+      error: convergenceError,
+      circuitState: 'open',
+      consecutiveFailures: outcome.schedule.consecutiveFailures,
+    }, `${outcome.schedule.title}: recovery required`);
+    await attachScheduleRecoveryWorkItem(run.scheduleId, workItemId);
+    await attachScheduledRunWorkItem(run.id, workItemId);
+  }
+  return target;
+}
+
 export function registerTaskCompleteRoute(app: FastifyInstance): void {
   app.post('/tasks/:id/complete', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -73,23 +119,24 @@ export function registerTaskCompleteRoute(app: FastifyInstance): void {
 
     let scheduledStatus: string | undefined;
     let scheduledWarning: string | undefined;
+    let scheduledConvergencePending = false;
     const scheduledRunId = (taskRun.metadata as { scheduledWork?: { runId?: unknown } } | undefined)
       ?.scheduledWork?.runId;
     if (typeof scheduledRunId === 'string' && scheduledRunId) {
       try {
-        const run = await loadScheduledWorkItemRun(scheduledRunId);
-        if (run && !terminal(run.status)) {
-          const target = effectiveStatus === 'succeeded' ? 'succeeded' : 'failed';
-          await transitionScheduledWorkRun(scheduledRunId, target, {
-            error: effectiveStatus === 'succeeded' ? undefined : error ?? `task ${effectiveStatus}`,
-            resultSummary: result,
-          });
-          scheduledStatus = target;
-        } else if (run) {
-          scheduledStatus = run.status;
-        }
+        const target = effectiveStatus === 'succeeded' ? 'succeeded' : 'failed';
+        const convergenceError = effectiveStatus === 'succeeded'
+          ? undefined
+          : error ?? `task ${effectiveStatus}`;
+        scheduledStatus = await _convergeScheduledRunForCompletion(
+          scheduledRunId, target, convergenceError, result,
+        );
       } catch (err: any) {
+        // The task is already terminal; do not fail the completion request.
+        // Signal that the scheduled run still needs convergence so the
+        // periodic orphan sweep retries it instead of leaving a silent 200.
         scheduledWarning = err?.message ?? String(err);
+        scheduledConvergencePending = true;
       }
     }
     return {
@@ -98,6 +145,7 @@ export function registerTaskCompleteRoute(app: FastifyInstance): void {
       status: updated.status,
       ...(scheduledStatus ? { scheduledStatus } : {}),
       ...(scheduledWarning ? { scheduledWarning } : {}),
+      ...(scheduledConvergencePending ? { scheduledConvergencePending: true } : {}),
     };
   });
 }
