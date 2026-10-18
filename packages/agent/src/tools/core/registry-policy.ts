@@ -27,6 +27,7 @@ export type ToolExecutionReasonCode =
   | 'tool_sandbox_required'
   | 'tool_permission_denied'
   | 'tool_approval_required'
+  | 'tool_scope_mismatch'
   | 'phase_blocked'
   | 'operator_rule_block';
 
@@ -176,6 +177,7 @@ export const READ_ONLY_BUILTIN_TOOLS = [
 ] as const;
 
 export type ApprovalEnforcement = 'warn' | 'block';
+export type ScopeEnforcement = 'warn' | 'block';
 
 export interface ApprovalGateDecision {
   action: 'allow' | 'warn' | 'block';

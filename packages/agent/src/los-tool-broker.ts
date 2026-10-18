@@ -12,7 +12,7 @@ import { preActionGate, type PreActionGateConfig } from './pre-action-gate.js';
 import { evaluateOperatorRuleGate } from './operator-rules-runtime.js';
 import type { PersistedToolResultEvidence } from './semantic-eviction.js';
 import type { ToolRegistry } from './tools/core/registry.js';
-import { evaluateApprovalGate, evaluateScopeGate, type ApprovalEnforcement } from './tools/core/registry-policy.js';
+import { evaluateApprovalGate, evaluateScopeGate, type ApprovalEnforcement, type ScopeEnforcement } from './tools/core/registry-policy.js';
 
 type EmitEvent = (event: Record<string, unknown>) => Promise<{ id?: number } | undefined>;
 type SessionErrorRecord = { turn: number; type: string; toolName?: string; message: string };
@@ -37,6 +37,8 @@ export function createLosToolBroker(input: {
   preActionGateConfig?: PreActionGateConfig;
   /** Approval enforcement for `needsApproval` tools. Defaults to warn. */
   approvalEnforcement?: ApprovalEnforcement;
+  /** Scope enforcement. Defaults to warn; set LOS_TOOL_SCOPE_ENFORCEMENT=block to deny. */
+  scopeEnforcement?: ScopeEnforcement;
 }): LosToolBroker {
   return {
     isParallelizable: name => input.tools.getCapability(name)?.parallelizable === true,
@@ -91,8 +93,8 @@ async function executeBrokeredTool(
     },
   });
 
-  // Scope 读取点（Slice 1：warn-only）。声明了 scope 的工具，如果参数里给了与当前
-  // run 上下文不一致的 id，就把这件事变成**事件**；不拒（切 deny 是单独的行为变更）。
+  // Scope 读取点。默认 warn（记录事件、照常执行）；设 LOS_TOOL_SCOPE_ENFORCEMENT=block
+  // 后与 approval gate 同样的 fail-closed 语义：拒绝、handler 不执行。
   const scopeCheck = evaluateScopeGate(capability ?? undefined, request.arguments, {
     tenantId: config.tenantId,
     projectId: config.projectId,
@@ -100,6 +102,9 @@ async function executeBrokeredTool(
     sessionId: config.sessionId,
     taskRunId: config.taskRunId,
   });
+  const scopeEnforcement: ScopeEnforcement =
+    context.scopeEnforcement
+    ?? (process.env.LOS_TOOL_SCOPE_ENFORCEMENT === 'block' ? 'block' : 'warn');
   if (scopeCheck) {
     const isMismatch = 'mismatch' in scopeCheck;
     await emitEvent({
@@ -109,7 +114,8 @@ async function executeBrokeredTool(
       parentEventId: planEvent?.id ?? callEvent?.id,
       payload: {
         callId: request.callId,
-        mode: 'warn',
+        mode: scopeEnforcement,
+        action: scopeEnforcement,
         scopeId: isMismatch ? scopeCheck.mismatch.scopeId : scopeCheck.contextMissing,
         requested: isMismatch ? scopeCheck.mismatch.requested : scopeCheck.requested,
         ...(isMismatch
@@ -236,6 +242,19 @@ async function executeBrokeredTool(
         };
       }
     }
+  }
+
+  // Scope deny（仅 block 档，且前面的 gate 还没拒）。放在这里而不是更早，
+  // 是为了让 warn 事件先发出——观察期需要看到"本会拒绝"的调用，而不是被别的 gate 吞掉。
+  if (decision.allowed && scopeCheck && scopeEnforcement === 'block') {
+    const scopeId = 'mismatch' in scopeCheck ? scopeCheck.mismatch.scopeId : scopeCheck.contextMissing;
+    decision = {
+      allowed: false,
+      reasonCode: 'tool_scope_mismatch',
+      reason: `Tool ${request.name} was called with a ${scopeId} outside the current run scope`,
+      capability: decision.capability,
+      policy: decision.policy,
+    };
   }
 
   await config.onToolCallState?.({
