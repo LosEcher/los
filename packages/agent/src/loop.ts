@@ -53,6 +53,7 @@ import type {
 import type { Message, ToolCall } from './providers/index.js';
 import {
   consumeOperatorControlEvents,
+  isMidTurnDrain,
   type OperatorControlCursors,
 } from './operator-control-consumer.js';
 import {
@@ -450,6 +451,27 @@ export async function runAgent(
       };
     }
 
+    // Operator drain. `finish_current_tool` / `immediate` steering recorded
+    // while tools are running is applied after the current tool batch, so the
+    // model's next call sees it in the same turn; `finish_current_turn`
+    // (the recorded default) stays at the turn boundary.
+    const midTurnDrainCheck = async (): Promise<boolean> => {
+      const midTurn = await consumeOperatorControlEvents({
+        sessionId: config.sessionId,
+        runSpecId: config.runSpecId,
+        taskRunId: config.taskRunId,
+        turn: i + 1,
+        boundary: 'mid_turn',
+        cursors: operatorControlCursors,
+        includeFollowups: false,
+        acceptSteering: isMidTurnDrain,
+      });
+      operatorControlCursors = midTurn.cursors;
+      if (midTurn.consumed.length === 0) return false;
+      messages.push(...midTurn.consumed.map(item => item.message));
+      return true;
+    };
+
     // Execute tool calls
     const { toolResults, toolMessages, persistedToolResults: turnPersistedResults } = await runToolCalls({
       toolCalls: repaired.calls,
@@ -461,6 +483,7 @@ export async function runAgent(
       emitEvent,
       onSessionError,
       preActionGateConfig,
+      drainCheck: midTurnDrainCheck,
     });
     for (const [callId, evidence] of turnPersistedResults) {
       persistedToolResults.set(callId, evidence);

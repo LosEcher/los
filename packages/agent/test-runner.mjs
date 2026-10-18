@@ -155,6 +155,7 @@ const isolatedGroupA = [
 
 const isolatedGroupB = [
   'src/operator-control-consumer.test.ts',
+  'src/operator-control-drain.test.ts',
   'src/operator-control.test.ts',
   'src/operator-event-stream-cursor.test.ts',
   'src/pi-kernel-envelope.test.ts',
