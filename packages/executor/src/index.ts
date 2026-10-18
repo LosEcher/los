@@ -23,6 +23,7 @@ import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
 import { GatewayEventSink, countEventSpool, replayGatewayEventSpool } from './gateway-event-sink.js';
+import { postTaskCompletion } from './task-completion.js';
 import {
   _renewAgentTaskLease,
   _renewTaskLease,
@@ -165,7 +166,6 @@ export async function startExecutor() {
       return [];
     }
   };
-
   /**
    * 网关说"该换钥匙了"就自助轮换一次。失败不抛：旧凭据还有重叠窗口，
    * 下一轮心跳会再试（心跳是最便宜的重试时钟）。
@@ -195,7 +195,6 @@ export async function startExecutor() {
         rotationInFlight = false;
       });
   };
-
   const reportHeartbeat = createHeartbeatReporter(async () => {
     if (pendingCredentialPersist) {
       try {
@@ -210,7 +209,6 @@ export async function startExecutor() {
     const response = await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource, !dbDisabled);
     maybeRotateNodeCredential(response);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
-
   // Self-scheduling heartbeat: fires immediately, then waits
   // reportHeartbeat.nextIntervalMs() (base on success, exponential backoff
   // while the gateway is unreachable). Never blocks server startup.
@@ -222,7 +220,6 @@ export async function startExecutor() {
     }, reportHeartbeat.nextIntervalMs());
   };
   void scheduleHeartbeat();
-
   const server = createServer(async (req, res) => {
     try {
       const route = new URL(req.url ?? '/', publicUrl);
@@ -247,7 +244,6 @@ export async function startExecutor() {
         });
         return;
       }
-
       if (route.pathname.startsWith('/v1/artifacts')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
         if (dbDisabled) {
@@ -257,13 +253,11 @@ export async function startExecutor() {
         await handleArtifactRoute(req, res, route, nodeId, artifactStorageRoot);
         return;
       }
-
       if (route.pathname.startsWith('/v1/nodes/') && route.pathname.endsWith('/commands')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
         await handleNodeCommandRoute(req, res, route, nodeId, nodeCommandRuntime);
         return;
       }
-
       if (req.method === 'POST' && route.pathname === '/v1/tasks/run-agent') {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
         const activeTask = lifecycle.startTask();
@@ -284,14 +278,12 @@ export async function startExecutor() {
           activeTask.finish();
         }
       }
-
       if (route.pathname.startsWith('/v1/file-sync')) {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
         if (dbDisabled) { sendJson(res, 503, { error: 'file_sync_unavailable_in_stateless_mode' }); return; }
         await handleFileSyncRoute(req, res, route, nodeId, readJson, normalizeOptionalString, normalizePositiveInteger, sendJson);
         return;
       }
-
       sendJson(res, 404, { error: 'not found' });
     } catch (err: any) {
       log.error(err?.stack ?? String(err));
@@ -453,7 +445,15 @@ async function runAssignedAgentTask(
     const eventBacklog = eventSink ? await eventSink.drain(10_000) : 0;
     activeEventBacklog = eventBacklog;
     if (eventBacklog > 0) log.warn(`event sink backlog after task ${taskRunId}: ${eventBacklog}`);
+    if (eventPersistence === 'callback' && leaseHttp) {
+      await postTaskCompletion({ gatewayUrl: leaseHttp.gatewayUrl, taskToken: leaseHttp.taskToken, taskRunId, status: 'succeeded' });
+    }
     return { result, events, deltas, toolCallStates, kernelEvents, eventBacklog };
+  } catch (err: any) {
+    if (eventPersistence === 'callback' && gatewayUrl && leaseHttp) {
+      await postTaskCompletion({ gatewayUrl, taskToken: leaseHttp.taskToken, taskRunId, status: 'failed', error: err?.message ?? String(err) });
+    }
+    throw err;
   } finally {
     clearInterval(heartbeat);
   }
