@@ -88,6 +88,11 @@ export const SELF_AUTHENTICATED_PATHS = new Map([
     '`x-los-node-credential` 自证：用当前凭据换新凭据，旧值留 24h 重叠窗口（见 file:packages/agent/src/node-enrollment.ts:rotateNodeCredential）。',
   ],
   [
+    'POST /tasks/:id/agent-tasks/:agentTaskId/heartbeat',
+    '`x-los-task-token`（HMAC，绑定 taskRunId + leaseVersion + exp）；handler 还校验 agent task 的 running attempt 属于该 task run。' +
+      '自证且 fail-closed：验不过即 401/403/409。',
+  ],
+  [
     'POST /tasks/:id/heartbeat',
     '`x-los-task-token`（HMAC，绑定 taskRunId + leaseVersion + exp，见 file:packages/gateway/src/task-token.ts）。' +
       '自证且 fail-closed：验不过即 401，普通已认证主体也进不来。',
