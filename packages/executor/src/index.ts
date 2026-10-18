@@ -22,7 +22,7 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { handleStatelessArtifactRoute } from './stateless-artifact-store.js';
-import { GatewayEventSink, replayGatewayEventSpool } from './gateway-event-sink.js';
+import { GatewayEventSink, countEventSpool, replayGatewayEventSpool } from './gateway-event-sink.js';
 import {
   _renewAgentTaskLease,
   _renewTaskLease,
@@ -148,13 +148,11 @@ export async function startExecutor() {
   let pendingCredentialPersist: { credential: string; expiresAt?: string } | undefined;
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
   const fileSyncStore = createFileSyncStore();
-
   if (!heartbeatViaApi) {
     log.info('GATEWAY_URL not set — will heartbeat directly to database');
   } else {
     log.info(`Executing node heartbeat via gateway: ${gatewayUrl}/nodes/heartbeat`);
   }
-
   // Resolve active file-sync folders for heartbeat capability reporting
   const resolveFileSyncFolders = async () => {
     if (dbDisabled) return [];
@@ -229,6 +227,7 @@ export async function startExecutor() {
     try {
       const route = new URL(req.url ?? '/', publicUrl);
       if (req.method === 'GET' && route.pathname === '/health') {
+        const spoolBacklog = executorEventSpoolRoot ? await countEventSpool(executorEventSpoolRoot) : 0;
         sendJson(res, 200, {
           status: 'ok',
           nodeId,
@@ -243,6 +242,7 @@ export async function startExecutor() {
           taskTokenMode,
           db: dbDisabled ? 'none' : 'postgres',
           eventBacklog: activeEventBacklog,
+          spoolBacklog,
           leaseTransport: gatewayUrl ? 'http-when-token' : 'db',
         });
         return;

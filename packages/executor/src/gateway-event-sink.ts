@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { SessionEventRecord } from '@los/agent';
 
@@ -11,6 +11,8 @@ export interface GatewayEventSinkOptions {
   flushDelayMs?: number;
   /** When set, each event is written to disk before it is queued. */
   spoolRoot?: string;
+  /** Hard cap on spool files for this task; overflow stays in memory only. */
+  spoolMaxFiles?: number;
 }
 
 function fileNameFor(clientEventId: string): string {
@@ -31,6 +33,9 @@ export class GatewayEventSink {
   private flushing = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly taskDir?: string;
+  private spooledFiles = 0;
+  private spoolInitialized = false;
+  private droppedFromSpool = 0;
 
   constructor(private readonly options: GatewayEventSinkOptions) {
     this.taskDir = options.spoolRoot
@@ -42,13 +47,33 @@ export class GatewayEventSink {
     return this.queue.length;
   }
 
+  get spoolBacklog(): number {
+    return this.spooledFiles;
+  }
+
+  get spoolDropped(): number {
+    return this.droppedFromSpool;
+  }
+
+  dispose(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
   async enqueue(event: SessionEventRecord): Promise<void> {
     const clientEventId = `${this.options.taskRunId}:${event.id}:${this.seq++}`;
     const record = { ...event, clientEventId } as SessionEventRecord;
     if (this.taskDir) {
       try {
-        await mkdir(this.taskDir, { recursive: true });
-        await writeFile(join(this.taskDir, fileNameFor(clientEventId)), JSON.stringify(record), 'utf8');
+        await this.ensureSpoolCount();
+        const maxFiles = this.options.spoolMaxFiles ?? 10_000;
+        if (this.spooledFiles >= maxFiles) {
+          this.droppedFromSpool += 1;
+        } else {
+          await mkdir(this.taskDir, { recursive: true });
+          await writeFile(join(this.taskDir, fileNameFor(clientEventId)), JSON.stringify(record), 'utf8');
+          this.spooledFiles += 1;
+        }
       } catch {
         // Memory queue still carries the event; health exposes backlog.
       }
@@ -88,7 +113,10 @@ export class GatewayEventSink {
         if (this.taskDir) {
           await Promise.all(batch.map(async event => {
             const clientEventId = (event as SessionEventRecord & { clientEventId?: string }).clientEventId;
-            if (clientEventId) await unlink(join(this.taskDir!, fileNameFor(clientEventId))).catch(() => undefined);
+            if (clientEventId) {
+              await unlink(join(this.taskDir!, fileNameFor(clientEventId))).catch(() => undefined);
+              this.spooledFiles = Math.max(0, this.spooledFiles - 1);
+            }
           }));
         }
       }
@@ -97,6 +125,16 @@ export class GatewayEventSink {
     } finally {
       this.flushing = false;
       if (this.queue.length > 0) this.schedule();
+    }
+  }
+
+  private async ensureSpoolCount(): Promise<void> {
+    if (this.spoolInitialized) return;
+    this.spoolInitialized = true;
+    try {
+      this.spooledFiles = (await readdir(this.taskDir!)).filter(name => name.endsWith('.json')).length;
+    } catch {
+      this.spooledFiles = 0;
     }
   }
 
@@ -109,6 +147,45 @@ export class GatewayEventSink {
   }
 }
 
+/** Count unconsumed spool files under a node spool root. */
+export async function countEventSpool(root: string): Promise<number> {
+  let dirs: string[];
+  try { dirs = await readdir(resolve(root)); } catch { return 0; }
+  let count = 0;
+  for (const dir of dirs) {
+    try {
+      count += (await readdir(join(resolve(root), dir))).filter(name => name.endsWith('.json')).length;
+    } catch {
+      // ignore missing/racing dirs
+    }
+  }
+  return count;
+}
+
+/** Remove spool files older than maxAgeMs; returns number removed. */
+export async function _pruneEventSpool(root: string, maxAgeMs = 7 * 24 * 60 * 60_000): Promise<number> {
+  const base = resolve(root);
+  let dirs: string[];
+  try { dirs = await readdir(base); } catch { return 0; }
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const dir of dirs) {
+    const taskDir = join(base, dir);
+    let files: string[];
+    try { files = (await readdir(taskDir)).filter(name => name.endsWith('.json')); } catch { continue; }
+    for (const file of files) {
+      const path = join(taskDir, file);
+      try {
+        const info = await stat(path);
+        if (info.mtimeMs < cutoff) { await unlink(path); removed += 1; }
+      } catch {
+        // ignore races
+      }
+    }
+  }
+  return removed;
+}
+
 /**
  * Replay spool files left by a previous process. Auth is the node credential,
  * not the expired task token; the gateway still checks the task's node id.
@@ -119,8 +196,10 @@ export async function replayGatewayEventSpool(options: {
   nodeCredential: string;
   nodeId: string;
   fetchImpl?: typeof fetch;
+  maxAgeMs?: number;
 }): Promise<number> {
   const root = resolve(options.spoolRoot);
+  await _pruneEventSpool(root, options.maxAgeMs);
   let sent = 0;
   let dirs: string[];
   try {
