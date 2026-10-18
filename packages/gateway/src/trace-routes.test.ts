@@ -249,3 +249,81 @@ test('session trace route matches golden view-model fixture', async () => {
     await closeDb();
   }
 });
+
+test('incremental trace endpoint resumes the fold when a call and its result land in different windows', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-trace-split-${suffix}`;
+  const callId = `call-${suffix}`;
+
+  const app = await createServer({
+    serviceId: `gateway-trace-split-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await ensureSessionStore();
+    await ensureSessionEventStore();
+    await saveSession({
+      id: sessionId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      metadata: { prompt: 'split window' } as any,
+      messages: [],
+      turns: [],
+    });
+
+    await appendSessionEvent({
+      sessionId,
+      type: 'tool.call',
+      turn: 1,
+      toolName: 'read_file',
+      payload: { callId, args: { path: '/etc/hosts' } },
+    });
+
+    // Window 1 ends while the tool is still running: the cursor returned here
+    // is the key the router caches the fold state under.
+    const first = await app.inject({ method: 'GET', url: `/sessions/${sessionId}/trace/since?since=0` });
+    assert.equal(first.statusCode, 200);
+    const firstBody = first.json();
+    const firstCard = firstBody.messages
+      .flatMap((message: any) => message.toolCalls ?? [])
+      .find((toolCall: any) => toolCall.callId === callId);
+    assert.equal(firstCard?.toolName, 'read_file');
+    assert.equal(firstCard?.status, 'running');
+    assert.ok(firstBody.nextSince > 0);
+
+    await appendSessionEvent({
+      sessionId,
+      type: 'tool.result',
+      turn: 1,
+      toolName: 'read_file',
+      payload: { callId, ok: true, durationMs: 12, attempts: 1, contentPreview: '127.0.0.1 localhost' },
+    });
+
+    // Window 2 contains only the result. Without the carried fold state this
+    // fabricates a card with an empty toolName; with it the pair survives.
+    const second = await app.inject({
+      method: 'GET',
+      url: `/sessions/${sessionId}/trace/since?since=${firstBody.nextSince}`,
+    });
+    assert.equal(second.statusCode, 200);
+    const secondBody = second.json();
+    const secondCard = secondBody.messages
+      .flatMap((message: any) => message.toolCalls ?? [])
+      .find((toolCall: any) => toolCall.callId === callId);
+    assert.equal(secondCard?.toolName, 'read_file');
+    assert.equal(secondCard?.status, 'completed');
+    // Only the carried fold state knows the call's arguments: a window-only
+    // fold would still get the name from the result event but lose argsPreview.
+    assert.equal(secondCard?.argsPreview, '{"path":"/etc/hosts"}');
+    assert.equal(secondCard?.resultPreview, '127.0.0.1 localhost');
+  } finally {
+    await app.close();
+    await closeDb();
+  }
+});
