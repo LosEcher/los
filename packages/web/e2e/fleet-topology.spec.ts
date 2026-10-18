@@ -115,7 +115,7 @@ async function mockGateway(page: Page): Promise<Array<{ path: string; operator: 
   await page.route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.origin !== 'http://127.0.0.1:4273' || isAsset(url.pathname)) {
+    if (url.origin !== 'http://127.0.0.1:4173' || isAsset(url.pathname)) {
       await route.continue();
       return;
     }
