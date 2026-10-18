@@ -30,6 +30,32 @@ export PATH="$HOME/.cargo/bin:$HOME/Library/pnpm:$HOME/Library/Application Suppo
 mkdir -p "$LOG_DIR"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
+# ── 凭据从 Keychain 注入进程环境（2026-10-15）────────────────────────────────
+# 为什么：本仓纪律是「明文只出现在 ① 进程环境/fd ② 目标程序内存」。而 los 的 `.env` 里曾有
+# 3 把明文（LOS_OPERATOR_TOKEN / LOS_AUTH_TOKEN / EXECUTOR_AGENT_KEY），它们同时是
+# dsfolder/.credential-hygiene/registry.json 里 `los-env` 面（plaintext=12）的一部分。
+# 注入之后，轮换只需改 Keychain + 重启，**不必再动任何文件**。
+#
+# Keychain service 约定：
+#   los-operator-token / los-auth-token / los-executor-key          ← 当前值
+#   <同名>-previous                                                 ← 轮换窗口的上一把
+# 窗口语义见 dsfolder/runbooks/credential-rotation-3-secrets-2026-10-15.md §2：
+# 网关同时接受「当前值 或 上一把」，且 `*_PREVIOUS` **不能单独授权**（主键缺失一律 401）。
+#
+# ⚠️ 未装对应 Keychain 项时**静默跳过**：回落到 `.env`/既有环境，绝不阻断启动。
+INJECTED=""
+inject_keychain() {
+  local svc="$1" var="$2" v
+  v="$(security find-generic-password -s "$svc" -a "$USER" -w 2>/dev/null || true)"
+  if [ -n "$v" ]; then export "$var=$v"; INJECTED="$INJECTED $var"; fi
+}
+inject_keychain los-operator-token          LOS_OPERATOR_TOKEN
+inject_keychain los-auth-token              LOS_AUTH_TOKEN
+inject_keychain los-executor-key            EXECUTOR_AGENT_KEY
+inject_keychain los-operator-token-previous LOS_OPERATOR_TOKEN_PREVIOUS
+inject_keychain los-auth-token-previous     LOS_AUTH_TOKEN_PREVIOUS
+inject_keychain los-executor-key-previous   EXECUTOR_AGENT_KEY_PREVIOUS
+
 # EXECUTOR_ENABLED 缺省视为 true(los.sh 同语义:仅显式 false 时禁用)。
 is_executor_enabled() {
   local val
@@ -52,7 +78,7 @@ http_ok() {
   [ "$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" = "200" ]
 }
 
-log "wrapper started (pid $$, interval=${INTERVAL_SECONDS}s)"
+log "wrapper started (pid $$, interval=${INTERVAL_SECONDS}s; keychain injected:${INJECTED:- (none)})"
 
 while true; do
   gw_ok=false

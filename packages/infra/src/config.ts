@@ -254,6 +254,30 @@ export const ConfigSchema = z.object({
     version: z.string().trim().min(1).optional(),
     agentKey: z.string().optional(),
     /**
+     * 任务级短时令牌的 HMAC 密钥（C.2 第一步）。
+     *
+     * 只由网关读写：`POST /tasks/:id/token` 用它签，`POST /tasks/:id/heartbeat` 用它验。
+     * **不设即拒绝签发**（返回 503），刻意不回退到 `agentKey`——否则共享密钥又变成
+     * 一条可签发任务令牌的路径，per-task 边界就名存实亡。
+     */
+    taskTokenSecret: z.string().optional(),
+    /**
+     * Previous task-token secret kept during a rotation window. Verification
+     * accepts current or previous; minting uses current only. Remove it after
+     * every token signed with it has expired (max 1h).
+     */
+    taskTokenSecretPrevious: z.string().optional(),
+    /**
+     * Task-token heartbeat transport policy.
+     *
+     * - `auto` (default): mint a token when a secret is configured; the executor
+     *   uses HTTP when the dispatch carries one, otherwise keeps the direct-DB path.
+     * - `required`: the gateway must have a secret and every dispatch must carry a
+     *   token; remote executors must have `GATEWAY_URL`. Refuse DB fallback.
+     * - `off`: do not mint; retain the legacy direct-DB path (transition only).
+     */
+    taskTokenMode: z.enum(['auto', 'required', 'off']).optional(),
+    /**
      * Per-node credential issued by `POST /nodes/enroll` (redeemed from a one-time
      * enrollment token). Sent as `x-los-node-credential` on the node heartbeat so the
      * gateway can attribute the row to this node instead of relying on the shared
@@ -261,6 +285,12 @@ export const ConfigSchema = z.object({
      * gateway keeps accepting them (ADR 0048 B3 transition).
      */
     nodeCredential: z.string().optional(),
+    /**
+     * 节点凭据 TTL（天）。`POST /nodes/enroll` 签发时落库，`verifyNodeCredential`
+     * 过期即拒。默认 30 天（旧实现的 365 天只写在返回值里、从不校验）。
+     * 存量凭据按 `enrolled_at + 365d` 折算，不追溯缩短。
+     */
+    nodeCredentialTtlDays: z.coerce.number().int().min(1).max(365).default(30),
     nodeId: z.string().optional(),
     nodeUrl: z.string().optional(),
     nodeKind: z.string().optional(),

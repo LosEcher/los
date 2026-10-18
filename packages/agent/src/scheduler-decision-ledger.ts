@@ -3,6 +3,30 @@ import { normalizeOptionalString } from './scheduler/helpers.js';
 
 export type SchedulerDecisionKind = 'claim' | 'provider_selection' | 'executor_selection' | 'task_outcome';
 
+/**
+ * 已知 kind 的**运行时**清单（单一真源）。
+ * 为什么要有运行时值：读路径要能判断"这一行的 kind 是不是闭集之内"，
+ * 而 type union 在运行时不存在。硬编码第二份清单必然漂移——
+ * 实测教训：读模型里按单一 kind 比较，把合法的 `task_outcome` 报成了"非预期 kind"，
+ * 于是告警通道在真实数据上永久误报（假警报会把通道训练成噪音）。
+ */
+const KNOWN_KINDS: readonly SchedulerDecisionKind[] = [
+  'claim',
+  'provider_selection',
+  'executor_selection',
+  'task_outcome',
+];
+
+/**
+ * 判断一个原始 kind 是否落在闭集内。
+ * 为什么导出**谓词**而不是导出清单常量：清单常量在别的模块里只会被成员判断消费
+ * （不构成"调用"），而接线门禁的判据是"导出符号必须在别处被调用" ⇒
+ * 导出清单会被机械判成孤儿导出。谓词既满足门禁，也正是消费方真正需要的能力。
+ */
+export function isSchedulerDecisionKind(value: unknown): value is SchedulerDecisionKind {
+  return typeof value === 'string' && (KNOWN_KINDS as readonly string[]).includes(value);
+}
+
 export interface SchedulerDecisionRecord {
   id: string;
   graphId: string;
@@ -12,7 +36,18 @@ export interface SchedulerDecisionRecord {
   runSpecId?: string;
   sessionId?: string;
   nodeId?: string;
-  kind: SchedulerDecisionKind;
+  /**
+   * 已知 kind；`null` 表示这一行是**类型外的历史值**（见 `kindRaw`）。
+   *
+   * 为什么读路径不抛错：库里实测存在 `kind='placement_decision'`（2026-06-21，2 行）。
+   * 旧实现让读路径的 `normalizeKind` 抛错 ⇒ **任何不带 kind 过滤的批量读整段失败**，
+   * 这类行于是永久不可见——错误被吞成"查不出来"，而不是"有一行不认识"。
+   * 现在它是可检测状态：调用方可以计数/告警/按需忽略（"错误即数据"）。
+   * 写路径仍然严格（`normalizeKind`），不接受类型外的值写入。
+   */
+  kind: SchedulerDecisionKind | null;
+  /** 数据库里的原始 kind 文本，永远保留（可追溯：图上/报告里能显示它到底是什么）。 */
+  kindRaw: string;
   selectedIds: string[];
   skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
   reason: string;
@@ -47,6 +82,7 @@ export interface ListSchedulerDecisionsOptions {
   limit?: number;
 }
 
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS scheduler_decisions (
   id TEXT PRIMARY KEY,
@@ -71,6 +107,9 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_graph ON scheduler_decisions(
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_task ON scheduler_decisions(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_kind ON scheduler_decisions(kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_session ON scheduler_decisions(session_id, created_at DESC);
+-- 时间窗倒序读（listSchedulerDecisionWindow）只按 created_at 过滤：上面四个复合索引都以
+-- 别的列打头，用不上它 ⇒ 没有这个索引时窗口查询退化成全表扫（现在表小，随决策增长会变成热点）。
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_created ON scheduler_decisions(created_at DESC);
 `;
 
 let _initialized = false;
@@ -290,7 +329,7 @@ export async function getProviderRecentOutcomes(
   }));
 }
 
-type SchedulerDecisionRow = {
+export type SchedulerDecisionRow = {
   id: string;
   graph_id: string;
   task_id: string | null;
@@ -309,7 +348,7 @@ type SchedulerDecisionRow = {
   created_at: Date | string;
 };
 
-function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
+export function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
   return {
     id: row.id,
     graphId: row.graph_id,
@@ -319,7 +358,8 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
     runSpecId: row.run_spec_id ?? undefined,
     sessionId: row.session_id ?? undefined,
     nodeId: row.node_id ?? undefined,
-    kind: normalizeKind(row.kind),
+    kind: readKind(row.kind),
+    kindRaw: row.kind,
     selectedIds: normalizeStringArray(row.selected_ids_json),
     skipped: normalizeSkippedFromJson(row.skipped_json),
     reason: row.reason,
@@ -330,9 +370,22 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
   };
 }
 
+
+
+/**
+ * 写路径：类型外的值一律拒绝（fail closed，守卫只能收紧）。
+ */
 function normalizeKind(value: unknown): SchedulerDecisionKind {
-  if (value === 'claim' || value === 'provider_selection' || value === 'executor_selection' || value === 'task_outcome') return value;
+  if (isSchedulerDecisionKind(value)) return value;
   throw new Error('scheduler decision kind is invalid');
+}
+
+/**
+ * 读路径：类型外 = `null`（可检测状态），不抛错。原值由 `kindRaw` 保留。
+ * 读路径与写路径**必须分开**：写路径拒绝坏数据，读路径不能因为一行历史坏数据就整段查不出来。
+ */
+function readKind(value: unknown): SchedulerDecisionKind | null {
+  return isSchedulerDecisionKind(value) ? value : null;
 }
 
 function normalizeSkipped(

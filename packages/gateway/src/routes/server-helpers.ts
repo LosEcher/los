@@ -58,6 +58,32 @@ export function normalizeNonNegativeInteger(value: unknown, fallback: number): n
   return fallback;
 }
 
+/**
+ * 严格解析**可选的有界整数查询参数**。
+ *
+ * 为什么不复用 `normalizeBoundedInteger`（它是夹取的）：夹取会让
+ * `?limit=99999` 静默变成上限值，调用方以为自己的过滤生效了。
+ * 新增的有界参数一律**显式失败**（400 + 指名参数与范围），
+ * 缺省由调用方决定（返回 `value: undefined`，不在这里塞默认值）。
+ */
+export type BoundedIntegerParamResult =
+  | { ok: true; value: number | undefined }
+  | { ok: false; message: string };
+
+export function parseBoundedIntegerParam(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+): BoundedIntegerParamResult {
+  if (value === undefined || value === null || value === '') return { ok: true, value: undefined };
+  const parsed = typeof value === 'number' ? value : Number(String(value));
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min || parsed > max) {
+    return { ok: false, message: `${name} must be an integer between ${min} and ${max}` };
+  }
+  return { ok: true, value: parsed };
+}
+
 export function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
   const n = typeof value === 'string'
     ? parseInt(value)

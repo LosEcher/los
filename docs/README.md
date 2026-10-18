@@ -158,6 +158,18 @@ Use `architecture/2026-10-11-cross-device-task-handling-phased-design.md` for th
 design (P0 observability → P1 placement → P2 multi-device fan-out → P3 storage → P4
 governance) of cross-device and cross-project task handling on the M1/M3/Win fleet.
 
+Use `architecture/2026-10-18-remote-workspace-handoff-adversarial-review.md` for the
+adversarial review that killed the "build a full Workspace Lease platform first"
+plan: why the next step is one end-to-end handoff/recovery spike, the four storage
+boundaries (git / worktree / artifact / losvault), the five mechanical lease
+failures, and the revised batch plan.
+
+Use `architecture/2026-10-18-task-token-heartbeat-and-stateless-executor.md` for the
+task-token delivery gap (mint exists, dispatch consumes nothing), the HTTP-heartbeat
+phase A contract and failure semantics, why "remove DATABASE_URL" is a four-stage
+stateless-executor project rather than one endpoint, and the per-tool scope /
+`los tools --check` governance plan.
+
 Use `architecture/2026-10-11-cross-project-and-cross-device-task-model-review.md` for the
 three-layer review of cross-project and cross-device task handling: what holds today
 (dispatch per project, aggregate reads), what does not (per-project run views, remote

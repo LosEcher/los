@@ -38,6 +38,7 @@ export default defineConfig({
       '/skills': 'http://127.0.0.1:8080',
       '/tasks': 'http://127.0.0.1:8080',
       '/todos': 'http://127.0.0.1:8080',
+      '/topology': 'http://127.0.0.1:8080',
       '/workspace': 'http://127.0.0.1:8080',
       '/work-items': 'http://127.0.0.1:8080',
       '/usage': 'http://127.0.0.1:8080',

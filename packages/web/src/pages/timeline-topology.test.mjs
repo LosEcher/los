@@ -43,6 +43,10 @@ describe('timeline + topology panel wiring', () => {
     const runs = read('pages/run-specs-page.tsx');
     assert.match(runs, /TopologyPanel/);
     assert.match(topology, /\/runs\/\$\{encodeURIComponent\(runSpecId!\)\}\/inspect/);
+    // 落点事实（B 层 → A 层的桥）：只读服务端投影，不在前端重算
+    assert.match(topology, /state\?\.placement/);
+    assert.match(topology, /assets\.topology\.placement/);
+    assert.match(topology, /assets\.topology\.placementMissing/);
   });
 
   it('registers timeline and topology keys in both locales', () => {
@@ -50,6 +54,7 @@ describe('timeline + topology panel wiring', () => {
     const zh = read('i18n/zh/assets2.ts');
     for (const key of ['assets.timeline.title', 'assets.timeline.selectHint', 'assets.timeline.duration',
       'assets.topology.title', 'assets.topology.stats', 'assets.topology.hint',
+      'assets.topology.placement', 'assets.topology.placementMissing',
       'assets.subagents.title', 'assets.subagents.count']) {
       assert.match(en, new RegExp(`'${key}'`), `en missing ${key}`);
       assert.match(zh, new RegExp(`'${key}'`), `zh missing ${key}`);

@@ -1,3 +1,4 @@
+import { decimals, num } from '../components/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, RefreshCw } from 'lucide-react';
 
@@ -130,9 +131,9 @@ export function DailyQualityView() {
               [t('ops.dailyQuality.provFailures'), count(latest.providerQuality.failureCount)],
               [t('ops.dailyQuality.provSuccessRate'), percent(latest.providerQuality.successRate)],
               [t('ops.dailyQuality.provAvgLatency'), duration(latest.providerQuality.averageLatencyMs, t)],
-              [t('ops.dailyQuality.provAvgRetries'), latest.providerQuality.averageRetryCount.toFixed(1)],
+              [t('ops.dailyQuality.provAvgRetries'), decimals(latest.providerQuality.averageRetryCount, 1)],
               [t('ops.dailyQuality.provToolErrors'), count(latest.providerQuality.toolErrorCount)],
-              [t('ops.dailyQuality.provModelCost'), `$${latest.providerQuality.modelCost.toFixed(4)}`],
+              [t('ops.dailyQuality.provModelCost'), `$${decimals(latest.providerQuality.modelCost, 4)}`],
             ]} />
           </div>
 
@@ -204,17 +205,17 @@ function SnapshotHistory({ snapshots }: { snapshots: DailyAgentQualitySnapshot[]
 }
 
 function count(value: number): string {
-  return value.toLocaleString();
+  return num(value);
 }
 
 function percent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
+  return `${decimals(value * 100, 1)}%`;
 }
 
 function duration(value: number | undefined, t: (key: string) => string): string {
   if (value === undefined) return t('ops.na');
   if (value < 1_000) return `${Math.round(value)}ms`;
-  if (value < 60_000) return `${(value / 1_000).toFixed(1)}s`;
+  if (value < 60_000) return `${decimals(value / 1_000, 1)}s`;
   if (value < 3_600_000) return `${Math.round(value / 60_000)}m`;
-  return `${(value / 3_600_000).toFixed(1)}h`;
+  return `${decimals(value / 3_600_000, 1)}h`;
 }

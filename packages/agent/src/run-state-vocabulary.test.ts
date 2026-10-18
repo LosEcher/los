@@ -128,3 +128,41 @@ function recovery(input: Partial<ToolCallRecoveryDecision> = {}): ToolCallRecove
     ...input,
   };
 }
+
+test('run state projection carries placement facts (observed, not normalized)', () => {
+  const projection = buildRunStateProjection({
+    runSpec: runSpec({ id: 'run-placement', status: 'succeeded' }),
+    taskRuns: [
+      taskRun({ id: 'task-a', status: 'succeeded', nodeId: 'mbp-executor-1', provider: 'deepseek', model: 'deepseek-v4', workspaceRoot: '/tmp/ws-a' }),
+      taskRun({ id: 'task-b', status: 'succeeded', nodeId: 'mbp-executor-1', provider: 'deepseek', model: 'deepseek-v4', workspaceRoot: '/tmp/ws-a' }),
+      taskRun({ id: 'task-c', status: 'succeeded', nodeId: 'gateway-local', provider: 'kimi', model: 'kimi-k2', workspaceRoot: '/tmp/ws-b' }),
+      // 没有落点 ⇒ 只体现在计数里（workspaceRoot 显式给值，避免继承 helper 的 cwd 默认值）
+      taskRun({ id: 'task-d', status: 'succeeded', workspaceRoot: '/tmp/ws-a' }),
+    ],
+    verificationRecords: [],
+    recovery: recovery(),
+  });
+
+  // 去重 + 稳定升序（确定性，便于断言与比对）
+  assert.deepEqual(projection.placement.nodeIds, ['gateway-local', 'mbp-executor-1']);
+  assert.deepEqual(projection.placement.providers, ['deepseek', 'kimi']);
+  assert.deepEqual(projection.placement.models, ['deepseek-v4', 'kimi-k2']);
+  assert.deepEqual(projection.placement.workspaceRoots, ['/tmp/ws-a', '/tmp/ws-b']);
+  // `gateway-local` **必须原样保留**：它是"网关进程内执行"的真实落点，
+  // 归一化掉它就等于把"字段被当成两种东西用"这个症状抹平
+  assert.ok(projection.placement.nodeIds.includes('gateway-local'));
+  // 缺失不补默认值，只计数
+  assert.equal(projection.placement.taskRunsWithoutNode, 1);
+});
+
+test('run state projection placement is empty (not fabricated) when nothing ran', () => {
+  const projection = buildRunStateProjection({
+    runSpec: runSpec({ id: 'run-empty', status: 'created' }),
+    taskRuns: [],
+    verificationRecords: [],
+    recovery: recovery(),
+  });
+  assert.deepEqual(projection.placement, {
+    nodeIds: [], providers: [], models: [], workspaceRoots: [], taskRunsWithoutNode: 0,
+  });
+});

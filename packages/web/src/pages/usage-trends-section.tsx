@@ -5,6 +5,7 @@
  * latency, error rate, calls, and a compare block (current vs previous window
  * deltas). Sparklines are self-drawn SVG (no new deps).
  */
+import { decimals } from '../components/format';
 import { ArrowDownRight, ArrowUpRight, Minus, TrendingUp } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { Sparkline } from './sparkline.js';
@@ -128,5 +129,5 @@ export function UsageTrendsSection({ data }: { data: MetricsTrendsResponse | und
 }
 
 function pct(n: number): string {
-  return `${(n * 100).toFixed(1)}%`;
+  return `${decimals(n * 100, 1)}%`;
 }

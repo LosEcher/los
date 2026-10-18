@@ -1,3 +1,4 @@
+import { decimals } from './components/format';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, CalendarDays, GitCompare, TrendingDown, TrendingUp, Zap, Plus } from 'lucide-react';
@@ -244,9 +245,9 @@ function EvalSummaryView({ data, loading }: { data?: EvalSummary; loading: boole
         <MetricCard label={t('ops.evals.metricSuccessRate')} value={fmtPct(totals.successRate)} tone={totals.successRate >= 0.8 ? 'ok' : totals.successRate >= 0.5 ? 'warn' : 'err'} />
         <MetricCard label={t('ops.evals.metricFailures')} value={String(totals.failureCount)} tone={totals.failureCount > 0 ? 'warn' : 'ok'} />
         <MetricCard label={t('ops.evals.metricAvgLatency')} value={totals.averageLatencyMs !== undefined ? `${Math.round(totals.averageLatencyMs)}ms` : t('ops.na')} />
-        <MetricCard label={t('ops.evals.metricAvgRetries')} value={totals.averageRetryCount.toFixed(1)} />
+        <MetricCard label={t('ops.evals.metricAvgRetries')} value={decimals(totals.averageRetryCount, 1)} />
         <MetricCard label={t('ops.evals.metricToolErrors')} value={String(totals.toolErrorCount)} tone={totals.toolErrorCount > 0 ? 'warn' : 'ok'} />
-        <MetricCard label={t('ops.evals.metricModelCost')} value={`$${totals.modelCost.toFixed(4)}`} />
+        <MetricCard label={t('ops.evals.metricModelCost')} value={`$${decimals(totals.modelCost, 4)}`} />
       </div>
 
       <div className="summary-groups">
@@ -322,7 +323,7 @@ function GroupTable({ title, groups }: { title: string; groups: EvalSummaryGroup
             <td className="cell-num">{fmtPct(g.successRate)}</td>
             <td className="cell-num">{g.failureCount}</td>
             <td className="cell-num">{g.averageLatencyMs !== undefined ? `${Math.round(g.averageLatencyMs)}ms` : t('ops.na')}</td>
-            <td className="cell-num">{g.averageRetryCount.toFixed(1)}</td>
+            <td className="cell-num">{decimals(g.averageRetryCount, 1)}</td>
             <td className="cell-num">{g.toolErrorCount}</td>
           </tr>
         )}
@@ -355,8 +356,8 @@ function DeltaCard({ label, base, cand, delta, pct, ms, fixed, cost }: {
     if (v === undefined || v === null) return t('ops.na');
     if (pct) return fmtPct(v);
     if (ms) return `${Math.round(v)}ms`;
-    if (cost) return `$${v.toFixed(4)}`;
-    if (fixed) return v.toFixed(1);
+    if (cost) return `$${decimals(v, 4)}`;
+    if (fixed) return decimals(v, 1);
     return String(typeof v === 'number' ? Math.round(v) : v);
   };
   const baseFmt = fmt(base);
@@ -393,13 +394,13 @@ function DeltaCard({ label, base, cand, delta, pct, ms, fixed, cost }: {
   );
 }
 
-function fmtPct(v: number): string { return `${(v * 100).toFixed(1)}%`; }
+function fmtPct(v: number): string { return `${decimals(v * 100, 1)}%`; }
 
 function fmtSignedDelta(v: number, pct?: boolean, ms?: boolean, _cost?: boolean, fixed?: boolean): string {
   const sign = v > 0 ? '+' : '';
-  if (pct) return `${sign}${(v * 100).toFixed(1)}pp`;
+  if (pct) return `${sign}${decimals(v * 100, 1)}pp`;
   if (ms) return `${sign}${Math.round(v)}ms`;
-  if (fixed) return `${sign}${v.toFixed(1)}`;
+  if (fixed) return `${sign}${decimals(v, 1)}`;
   return `${sign}${Math.round(v)}`;
 }
 

@@ -115,12 +115,18 @@ const sharedProcessTestFiles = [
   'src/tools/builtin/worker-ask-tools.test.ts',
   'src/tools/external/mcp-client.test.ts',
   'src/tools/registry.test.ts',
+  'src/los-tool-broker-approval.test.ts',
+  'src/los-tool-broker-scope.test.ts',
+  'src/tools/core/registry-policy.test.ts',
+  'src/runtime-env.test.ts',
 ];
 
 // Full isolated classification always includes every group so local
 // `pnpm --filter @los/agent test` and CI group lanes share one inventory.
 const isolatedGroupA = [
   'src/agent-task-graph.test.ts',
+  'src/scheduler-decision-ledger.test.ts',
+  'src/scheduler-decision-window.test.ts',
   'src/daily-agent-quality.test.ts',
   'src/dead-letter.test.ts',
   'src/eval-probes.test.ts',
@@ -150,6 +156,7 @@ const isolatedGroupA = [
 
 const isolatedGroupB = [
   'src/operator-control-consumer.test.ts',
+  'src/operator-control-drain.test.ts',
   'src/operator-control.test.ts',
   'src/operator-event-stream-cursor.test.ts',
   'src/pi-kernel-envelope.test.ts',

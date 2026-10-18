@@ -1,21 +1,33 @@
-// ── Numeric formatters (Wave 4, P2-2) ──────────────────
-// Consistent number presentation across data-dense surfaces:
-// thousands separators, compact token counts, USD costs.
+// 再导出层：`format.mjs` 是可测实现，这里保持既有 import 路径与名字不变。
+// 既有名（formatNumber / formatTokenCount / formatUsd）语义与实现**未变**，
+// 只是改成别名指向 .mjs，所以调用方零改动。
 
-export function formatNumber(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '—';
-  return value.toLocaleString('en-US');
-}
+export {
+  setFormatLang,
+  getFormatLang,
+  ago,
+  elapsed,
+  duration,
+  uptime,
+  num,
+  num as formatNumber,
+  tokens,
+  tokens as formatTokenCount,
+  usd,
+  usd as formatUsd,
+  bytes,
+  decimals,
+  pct,
+  fraction,
+  diskLow,
+  DISK_LOW_FREE_RATIO,
+  NODE_STATUSES,
+  statusWord,
+  statusReason,
+} from './format.mjs';
 
-export function formatTokenCount(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '—';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
-export function formatUsd(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '—';
-  const digits = value >= 100 ? 0 : value >= 1 ? 2 : 3;
-  return `$${value.toFixed(digits)}`;
-}
+export type {
+  FormatLang,
+  NodeStatus,
+  StatusReasonInput,
+} from './format.mjs';

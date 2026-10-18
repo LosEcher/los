@@ -2,7 +2,7 @@ import { getDb, withDbClient } from '@los/infra/db';
 import { resolveCoordinationBackend } from './coordination/resolve.js';
 import { mergeRunContractMetadata, type RunContractMetadataInput } from './run-contract.js';
 import { TASK_RUN_SCHEMA } from './task-runs/schema.js';
-import { assertRow, normalizeLeaseMs } from './task-runs/normalizers.js';
+import { assertRow, normalizeLeaseMs, toIsoString } from './task-runs/normalizers.js';
 import { rowToTaskRun, type TaskRunRow } from './task-runs/rows.js';
 
 export type TaskRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
@@ -419,3 +419,81 @@ export async function listTaskRunsByStatus(
 
 export { claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun } from './task-runs/blocked-resume.js';
 export { recoverActiveTaskRunsForGateway } from './task-runs/recovery.js';
+
+/**
+ * 按**落点**（`task_runs.node_id`）做有界时间窗聚合 —— 机队拓扑里"谁真的在哪台机器上跑过"的观测面。
+ *
+ * 为什么按观测而不是按声明：`run_specs.node_id` 结构上不可达（放置路径不建 run_spec，711/711 NULL），
+ * 而"注册表里有这台机器"不等于"它真的承接了任务"。两者必须分开画，否则图会声称一种并不存在的可用性。
+ *
+ * 三条与"随手写个 group by"不同的地方：
+ *   1. **时间窗必填**：没有窗口就是全表聚合，资源守卫不允许（类型层强制，不是文档约定）。
+ *   2. `node_id` **原样返回**，不做归一化：实测这个字段里混着 `gateway-local`（网关进程内执行）、
+ *      `node-2`（未登记）和一个 **URL**（URL 硬钉路径污染）。归一化是读模型的语义决定；
+ *      存储层擅自合并会把"字段被当成两种东西用"这个症状抹掉。NULL 也原样保留。
+ *   3. `truncated` 可观测：按 total 倒序截断时，调用方必须能看出"还有别的落点没画进来"。
+ */
+export interface TaskRunPlacementSummary {
+  /** 原样的 `task_runs.node_id`；`null` = 该行没有落点（历史行或非派发路径）。 */
+  nodeId: string | null;
+  total: number;
+  succeeded: number;
+  failed: number;
+  blocked: number;
+  /** 该落点最近一次任务的时间（ISO）；无记录为 null。 */
+  lastAt: string | null;
+}
+
+export interface SummarizeTaskRunPlacementOptions {
+  /** 窗口下界（含）。必填。 */
+  since: string | Date;
+  /** 窗口上界（含）。默认 = 现在。 */
+  until?: string | Date;
+  /** 落点分组上限，默认 100、上限 500。 */
+  limit?: number;
+}
+
+export async function summarizeTaskRunPlacement(
+  options: SummarizeTaskRunPlacementOptions,
+): Promise<{ rows: TaskRunPlacementSummary[]; truncated: boolean; window: { since: string; until: string } }> {
+  await ensureTaskRunStore();
+  const since = toIsoString(options.since);
+  const until = toIsoString(options.until ?? new Date());
+  const requested = Number(options.limit);
+  const limit = Number.isFinite(requested) ? Math.max(1, Math.min(500, Math.floor(requested))) : 100;
+  // 多取一行只为判断"是否还有别的落点被截掉"，不改变返回集。
+  const rows = await getDb().query<{
+    node_id: string | null;
+    total: number;
+    succeeded: number;
+    failed: number;
+    blocked: number;
+    last_at: Date | string | null;
+  }>(
+    `SELECT node_id,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+            COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+            COUNT(*) FILTER (WHERE status = 'blocked')::int AS blocked,
+            MAX(created_at) AS last_at
+     FROM task_runs
+     WHERE created_at >= $1 AND created_at <= $2
+     GROUP BY node_id
+     ORDER BY total DESC, node_id ASC NULLS LAST
+     LIMIT $3`,
+    [since, until, limit + 1],
+  );
+  const truncated = rows.rows.length > limit;
+  return {
+    rows: rows.rows.slice(0, limit).map(row => ({
+      nodeId: row.node_id,
+      total: Number(row.total),
+      succeeded: Number(row.succeeded),
+      failed: Number(row.failed),
+      blocked: Number(row.blocked),
+      lastAt: row.last_at ? toIsoString(row.last_at) : null,
+    })),
+    truncated,
+    window: { since, until },
+  };
+}

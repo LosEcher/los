@@ -12,6 +12,7 @@ import { preActionGate, type PreActionGateConfig } from './pre-action-gate.js';
 import { evaluateOperatorRuleGate } from './operator-rules-runtime.js';
 import type { PersistedToolResultEvidence } from './semantic-eviction.js';
 import type { ToolRegistry } from './tools/core/registry.js';
+import { evaluateApprovalGate, evaluateScopeGate, type ApprovalEnforcement, type ScopeEnforcement } from './tools/core/registry-policy.js';
 
 type EmitEvent = (event: Record<string, unknown>) => Promise<{ id?: number } | undefined>;
 type SessionErrorRecord = { turn: number; type: string; toolName?: string; message: string };
@@ -34,6 +35,10 @@ export function createLosToolBroker(input: {
   emitEvent: EmitEvent;
   onSessionError: (error: SessionErrorRecord) => void;
   preActionGateConfig?: PreActionGateConfig;
+  /** Approval enforcement for `needsApproval` tools. Defaults to warn. */
+  approvalEnforcement?: ApprovalEnforcement;
+  /** Scope enforcement. Defaults to warn; set LOS_TOOL_SCOPE_ENFORCEMENT=block to deny. */
+  scopeEnforcement?: ScopeEnforcement;
 }): LosToolBroker {
   return {
     isParallelizable: name => input.tools.getCapability(name)?.parallelizable === true,
@@ -87,6 +92,38 @@ async function executeBrokeredTool(
       source: toolSource,
     },
   });
+
+  // Scope 读取点。默认 warn（记录事件、照常执行）；设 LOS_TOOL_SCOPE_ENFORCEMENT=block
+  // 后与 approval gate 同样的 fail-closed 语义：拒绝、handler 不执行。
+  const scopeCheck = evaluateScopeGate(capability ?? undefined, request.arguments, {
+    tenantId: config.tenantId,
+    projectId: config.projectId,
+    runSpecId: config.runSpecId,
+    sessionId: config.sessionId,
+    taskRunId: config.taskRunId,
+  });
+  const scopeEnforcement: ScopeEnforcement =
+    context.scopeEnforcement
+    ?? (process.env.LOS_TOOL_SCOPE_ENFORCEMENT === 'block' ? 'block' : 'warn');
+  if (scopeCheck) {
+    const isMismatch = 'mismatch' in scopeCheck;
+    await emitEvent({
+      type: 'tool.scope_mismatch',
+      turn: request.turn,
+      toolName: request.name,
+      parentEventId: planEvent?.id ?? callEvent?.id,
+      payload: {
+        callId: request.callId,
+        mode: scopeEnforcement,
+        action: scopeEnforcement,
+        scopeId: isMismatch ? scopeCheck.mismatch.scopeId : scopeCheck.contextMissing,
+        requested: isMismatch ? scopeCheck.mismatch.requested : scopeCheck.requested,
+        ...(isMismatch
+          ? { context: scopeCheck.mismatch.context }
+          : { contextMissing: true }),
+      },
+    });
+  }
 
   let decision = applyPhaseGate(
     tools.evaluateTool(request.name), request.name, config.runContractMetadata,
@@ -170,6 +207,54 @@ async function executeBrokeredTool(
         },
       });
     }
+  }
+
+  // Approval gate. `needsApproval` is declared by four tools (run_shell,
+  // run_remote_command, run_runtime_task, the background shell) and used to be
+  // serialized into events without a decision point. Warn by default; switch
+  // to block with LOS_TOOL_APPROVAL_ENFORCEMENT=block once the warn events show
+  // nobody relies on the missing channel.
+  if (decision.allowed) {
+    const enforcement: ApprovalEnforcement =
+      context.approvalEnforcement
+      ?? (process.env.LOS_TOOL_APPROVAL_ENFORCEMENT === 'block' ? 'block' : 'warn');
+    const gate = evaluateApprovalGate(decision.capability, enforcement);
+    if (gate.action !== 'allow') {
+      await emitEvent({
+        type: 'tool.approval_required',
+        turn: request.turn,
+        toolName: request.name,
+        parentEventId: planEvent?.id ?? callEvent?.id,
+        payload: {
+          callId: request.callId,
+          action: gate.action,
+          enforcementMode: enforcement,
+          reason: gate.reason,
+        },
+      });
+      if (gate.action === 'block' && decision.allowed) {
+        decision = {
+          allowed: false,
+          reasonCode: 'tool_approval_required',
+          reason: gate.reason ?? 'tool requires approval',
+          capability: decision.capability,
+          policy: decision.policy,
+        };
+      }
+    }
+  }
+
+  // Scope deny（仅 block 档，且前面的 gate 还没拒）。放在这里而不是更早，
+  // 是为了让 warn 事件先发出——观察期需要看到"本会拒绝"的调用，而不是被别的 gate 吞掉。
+  if (decision.allowed && scopeCheck && scopeEnforcement === 'block') {
+    const scopeId = 'mismatch' in scopeCheck ? scopeCheck.mismatch.scopeId : scopeCheck.contextMissing;
+    decision = {
+      allowed: false,
+      reasonCode: 'tool_scope_mismatch',
+      reason: `Tool ${request.name} was called with a ${scopeId} outside the current run scope`,
+      capability: decision.capability,
+      policy: decision.policy,
+    };
   }
 
   await config.onToolCallState?.({

@@ -8170,6 +8170,21 @@ button:disabled {
   font-family: var(--font-mono);
   user-select: none;
 }
+.topology-placement {
+  color: var(--text-tertiary, #94a3b8);
+  font-size: 12px;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+.topology-fold-stats {
+  color: var(--text-tertiary, #94a3b8);
+  margin-left: 8px;
+}
+
 .topology-collapsed {
   display: flex;
   align-items: center;
@@ -8851,3 +8866,31 @@ button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .task-row-icon, .task-row-status { transition: none; }
 }
+
+/* ── 机队拓扑面板（消费 GET /topology/fleet）──────────────────────────────
+   零依赖手写 SVG；颜色只用 token（--brand-*/--state-*/--text-*）。 */
+.fleet-topology { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.fleet-topology-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fleet-topology-head .muted { color: var(--text-tertiary, #94a3b8); font-size: 12px; }
+.fleet-topology-degraded {
+  display: flex; gap: 8px; align-items: flex-start;
+  border: 1px solid var(--state-warn-primary, #f0b429);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px;
+  background: color-mix(in srgb, var(--state-warn-primary, #f0b429) 12%, transparent);
+}
+.fleet-topology-degraded ul { margin: 4px 0 0; padding-left: 18px; }
+.fleet-topology-canvas { overflow: auto; border: 1px solid var(--border-l1, #243050); border-radius: 8px; padding: 6px; }
+.fleet-topology-canvas svg { width: 100%; height: auto; max-height: 78vh; display: block; }
+.fleet-topology-col-label { fill: var(--text-tertiary, #94a3b8); font-size: 10px; }
+.fleet-topology-node { cursor: pointer; }
+.fleet-topology-node-label { fill: var(--text-primary, #e6ecff); font-size: 10px; pointer-events: none; }
+.fleet-topology-node-metric { fill: var(--text-tertiary, #94a3b8); font-size: 10px; text-anchor: end; pointer-events: none; }
+.fleet-topology-detail { border: 1px solid var(--border-l1, #243050); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.fleet-topology-detail-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.fleet-topology-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+.fleet-topology-detail dt { color: var(--text-tertiary, #94a3b8); }
+.fleet-topology-detail dd { margin: 0; }
+.fleet-topology-hint { font-size: 12px; }
+.fleet-topology-sources { font-size: 12px; color: var(--text-tertiary, #94a3b8); }
+.fleet-topology-sources summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.fleet-topology-sources ul { margin: 6px 0 0; padding-left: 18px; }

@@ -16,6 +16,7 @@ Usage:
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
   los workspaces <plan|apply|list|inspect|backup|release> [options]
+  los tools [--check] [--strict] [--json] [--workspace PATH]
   los sessions [--gateway URL] [--json]
   los sessions trace <session-id> [--since N] [--json]
   los sessions follow <session-id> [--interval-ms N] [--max-idle-ms N]

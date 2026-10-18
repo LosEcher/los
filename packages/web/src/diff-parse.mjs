@@ -1,6 +1,7 @@
 /**
  * Line-level unified diff parser for the work review panel (G8).
- * Pure ESM module so `node --test src/*.test.mjs` can exercise it at runtime;
+ * Pure ESM module so the package `test` script (glob over src, see package.json) can exercise it
+ * at runtime;
  * TypeScript declarations live in diff-parse.d.mts.
  *
  * Understands the subset of `git diff --unified` output that the gateway

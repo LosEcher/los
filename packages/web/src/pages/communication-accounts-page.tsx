@@ -1,3 +1,4 @@
+import { formatTime } from '../ui';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
@@ -411,7 +412,7 @@ export function CommunicationAccountsPage() {
           {delivery?.assessedAt ? (
             <div className="fact">
               <span>{t('ops.commAccounts.assessedAt')}</span>
-              <span style={{ fontSize: 10 }}>{new Date(delivery.assessedAt).toLocaleTimeString()}</span>
+              <span style={{ fontSize: 10 }}>{formatTime(delivery.assessedAt)}</span>
             </div>
           ) : null}
         </div>

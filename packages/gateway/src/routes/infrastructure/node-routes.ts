@@ -34,7 +34,10 @@ import {
   evaluateNodeProbeRules,
 } from '../../node-probe-rules.js';
 import { requireOperator } from '../../request-context.js';
-import { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, verifyNodeCredential } from '@los/agent/node-enrollment';
+import { parseBoundedIntegerParam } from '../server-helpers.js';
+import { verifyNodeCredential } from '@los/agent/node-enrollment';
+import { credentialRotationDue, warnIfCredentialNearExpiry } from '../../node-credential-expiry.js';
+import { registerNodeCredentialRoutes } from './node-credential-routes.js';
 
 export type NodeRouteDependencies = {
   listExecutorNodes: typeof listExecutorNodes;
@@ -90,31 +93,18 @@ export function registerNodeRoutes(
   app: FastifyInstance,
   deps: NodeRouteDependencies = defaultDependencies,
 ): void {
+  registerNodeCredentialRoutes(app);
   app.get('/nodes', async (req, reply) => {
     if (!(await deps.requireOperator(req, reply))) return;
+    // limit 可选；缺省仍是 50（保持既有调用方行为），但**不再固定死**——
+    // 机队超过 50 台时旧实现会静默少给，且响应形状是裸数组、没有地方报"被截断"。
+    const limit = parseBoundedIntegerParam((req.query as { limit?: string } | undefined)?.limit, 'limit', 1, 500);
+    if (!limit.ok) {
+      reply.code(400);
+      return { error: limit.message };
+    }
     await deps.ensureExecutorNodeStore();
-    return await deps.listExecutorNodes();
-  });
-
-  app.post('/nodes/enrollment-tokens', async (req, reply) => {
-    if (!(await deps.requireOperator(req, reply))) return;
-    const body = req.body as Record<string, unknown> | undefined;
-    const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
-    if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });
-    const ttlMs = typeof body?.ttlMs === 'number' && Number.isFinite(body.ttlMs) ? body.ttlMs : undefined;
-    await ensureNodeEnrollmentStore();
-    return await issueNodeEnrollmentToken(nodeId, ttlMs);
-  });
-
-  app.post('/nodes/enroll', async (req, reply) => {
-    const body = req.body as Record<string, unknown> | undefined;
-    const token = normalizeOptionalString(body?.token);
-    const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
-    if (!token || !nodeId) return reply.status(400).send({ error: 'token and nodeId are required' });
-    await ensureNodeEnrollmentStore();
-    const result = await redeemNodeEnrollmentToken(token, nodeId);
-    if (!result) return reply.status(401).send({ error: 'invalid, expired, consumed, or mismatched enrollment token' });
-    return result;
+    return await deps.listExecutorNodes(limit.value ?? 50);
   });
 
   // B7: derived node health view (continuous 0-100 + level per node), computed
@@ -203,11 +193,17 @@ export function registerNodeRoutes(
     const credential = normalizeOptionalString(
       (req.headers['x-los-node-credential'] as string | undefined) ?? body?.credential,
     );
+    let credentialState: { credentialExpiresAt: string; credentialRotationDue: boolean } | undefined;
     if (credential) {
       const enrollment = await verifyNodeCredential(credential);
       if (!enrollment || enrollment.nodeId !== nodeId) {
         return reply.status(401).send({ error: 'invalid node credential' });
       }
+      credentialState = {
+        credentialExpiresAt: enrollment.expiresAt,
+        credentialRotationDue: credentialRotationDue(enrollment.expiresAt),
+      };
+      warnIfCredentialNearExpiry(nodeId, enrollment.expiresAt);
     }
 
     await deps.ensureExecutorNodeStore();
@@ -225,7 +221,7 @@ export function registerNodeRoutes(
       activeTaskCount: hasField(body, 'activeTaskCount') ? normalizeInteger(body?.activeTaskCount) : undefined,
       meshLinks: hasField(body, 'meshLinks') ? normalizeJsonArray(body?.meshLinks) : undefined,
     });
-    return { ok: true, nodeId: node.nodeId, status: node.status };
+    return { ok: true, nodeId: node.nodeId, status: node.status, ...(credentialState ?? {}) };
   });
 
   app.post('/nodes/:id/probe', async (req, reply) => {

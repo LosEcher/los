@@ -111,6 +111,7 @@ export function registerGetSymbolsTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0', permissions: ['workspace:read'], timeoutMs: 30_000,
     retryable: true, idempotent: true, costLevel: 'low', sideEffect: false, tags: ['ast', 'read'],
   });
@@ -235,6 +236,7 @@ export function registerFindInCodeTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0', permissions: ['workspace:read'], timeoutMs: 30_000,
     retryable: true, idempotent: true, costLevel: 'low', sideEffect: false, tags: ['ast', 'read'],
   });

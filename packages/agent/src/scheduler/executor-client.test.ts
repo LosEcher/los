@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 
 import { closeDb, getDb, initDb } from '@los/infra/db';
-import { loadConfig } from '@los/infra/config';
+import { loadConfig, setConfig } from '@los/infra/config';
+import { verifyTaskToken } from '@los/infra/task-token';
 import { upsertExecutorNode } from '../executor-nodes.js';
 import { listSchedulerDecisions } from '../scheduler-decision-ledger.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
-import { _compileExecutorRequirements, _ExecutorSelectionError, resolveExecutor } from './executor-client.js';
+import {
+  _compileExecutorRequirements,
+  _ExecutorSelectionError,
+  resolveExecutor,
+  runAgentOnExecutor,
+} from './executor-client.js';
+import { _resolveDispatchTaskToken } from './task-token-dispatch.js';
 import {
   deleteNodeMaintenancePolicy,
   upsertNodeMaintenancePolicy,
@@ -20,6 +28,96 @@ test('compileExecutorRequirements derives policy and compatibility requirements'
     ),
     ['heavy_task_safe', 'network_egress', 'sandbox', 'shell', 'workspace_write'],
   );
+});
+
+test('dispatch token is minted only when a secret is configured and mode is not off', async () => {
+  const base = await loadConfig();
+  const config = structuredClone(base);
+  config.executor.taskTokenSecret = 'dispatch-test-secret';
+  config.executor.taskTokenMode = 'auto';
+  setConfig(config);
+  try {
+    const token = _resolveDispatchTaskToken({ taskRunId: 'task-dispatch', leaseVersion: 4 });
+    assert.ok(token);
+    const verified = verifyTaskToken(token, 'dispatch-test-secret');
+    assert.equal(verified.ok, true);
+    if (!verified.ok) return;
+    assert.equal(verified.claims.taskRunId, 'task-dispatch');
+    assert.equal(verified.claims.leaseVersion, 4);
+
+    config.executor.taskTokenMode = 'off';
+    setConfig(config);
+    assert.equal(_resolveDispatchTaskToken({ taskRunId: 'task-dispatch', leaseVersion: 4 }), undefined);
+
+    config.executor.taskTokenMode = 'required';
+    config.executor.taskTokenSecret = undefined;
+    setConfig(config);
+    assert.throws(
+      () => _resolveDispatchTaskToken({ taskRunId: 'task-dispatch', leaseVersion: 4 }),
+      /LOS_TASK_TOKEN_SECRET/,
+    );
+  } finally {
+    setConfig(base);
+  }
+});
+
+test('runAgentOnExecutor puts taskToken in the dispatch envelope, never in config', async () => {
+  let captured = '';
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    req.on('end', () => {
+      captured = Buffer.concat(chunks).toString('utf8');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        result: { ok: true },
+        events: [],
+        deltas: [],
+        toolCallStates: [],
+        kernelEvents: [],
+      }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+
+  const base = await loadConfig();
+  const config = structuredClone(base);
+  config.executor.taskTokenSecret = 'envelope-test-secret';
+  config.executor.taskTokenMode = 'auto';
+  setConfig(config);
+  try {
+    await runAgentOnExecutor(
+      {
+        url: `http://127.0.0.1:${address.port}`,
+        nodeId: 'node-envelope',
+        agentKey: 'agent-key',
+        decision: { source: 'executor_registry', requiredCapabilities: [], candidateIds: [], skipped: [] },
+      },
+      {
+        taskRunId: 'task-envelope',
+        leaseVersion: 5,
+        leaseMs: 30_000,
+        executionKernelKind: 'los',
+        prompt: 'noop',
+        config: {} as never,
+      },
+    );
+  } finally {
+    setConfig(base);
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+
+  const body = JSON.parse(captured) as { taskToken?: string; config?: Record<string, unknown> };
+  assert.ok(body.taskToken);
+  assert.equal(body.config?.taskToken, undefined);
+  const verified = verifyTaskToken(body.taskToken, 'envelope-test-secret');
+  assert.equal(verified.ok, true);
+  if (verified.ok) {
+    assert.equal(verified.claims.taskRunId, 'task-envelope');
+    assert.equal(verified.claims.leaseVersion, 5);
+  }
 });
 
 test('resolveExecutor skips candidates missing required capabilities', async () => {

@@ -29,6 +29,29 @@ export type SessionTraceProjection = {
   turns: TraceTurnProjection[];
 };
 
+export type SessionTraceTurnMeta = Omit<TraceTurnProjection, 'turn' | 'toolCalls'>;
+
+/**
+ * Serializable fold state. Passing it back into `foldSessionTrace` makes an
+ * incremental fold equivalent to a single fold over the concatenated events.
+ *
+ * `lastEventId` is also the dedupe key: events at or below it are ignored, so
+ * replay/live overlap is idempotent.
+ */
+export type SessionTraceSeed = {
+  version: 1;
+  lastEventId: number;
+  sessionCompleted: boolean;
+  tools: TraceToolCallCard[];
+  turnMeta: Array<[number, SessionTraceTurnMeta]>;
+  turns: number[];
+};
+
+export type SessionTraceFold = {
+  projection: SessionTraceProjection;
+  seed: SessionTraceSeed;
+};
+
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -64,13 +87,34 @@ function resolveToolName(event: { toolName?: string | null; payload: unknown }):
 
 type ToolCardState = TraceToolCallCard;
 
-export function projectSessionTrace(sessionId: string, events: SessionEventRecord[]): SessionTraceProjection {
+export function foldSessionTrace(
+  sessionId: string,
+  events: SessionEventRecord[],
+  seed?: SessionTraceSeed,
+): SessionTraceFold {
   const toolByCallId = new Map<string, ToolCardState>();
   const toolsByTurn = new Map<number, string[]>();
-  const turnMeta = new Map<number, Omit<TraceTurnProjection, 'turn' | 'toolCalls'>>();
-  let sessionCompleted = false;
+  const turnMeta = new Map<number, SessionTraceTurnMeta>();
+  const seenTurns = new Set<number>(seed?.turns ?? []);
+  let sessionCompleted = seed?.sessionCompleted ?? false;
+  let lastEventId = seed?.lastEventId ?? 0;
+
+  if (seed) {
+    for (const card of seed.tools) {
+      toolByCallId.set(card.callId, { ...card });
+      const list = toolsByTurn.get(card.turn) ?? [];
+      list.push(card.callId);
+      toolsByTurn.set(card.turn, list);
+    }
+    for (const [turn, meta] of seed.turnMeta) turnMeta.set(turn, meta);
+  }
 
   for (const event of events) {
+    // Replay and live tail overlap by design: `lastEventId` makes the fold
+    // idempotent instead of double-counting a tool call or a turn.
+    if (event.id <= lastEventId) continue;
+    lastEventId = event.id;
+    if (event.turn > 0) seenTurns.add(event.turn);
     const payload = asObject(event.payload);
 
     if (event.type === 'session.completed') {
@@ -177,11 +221,7 @@ export function projectSessionTrace(sessionId: string, events: SessionEventRecor
   }
 
   const turns: TraceTurnProjection[] = [];
-  const allTurns = new Set<number>();
-  for (const event of events) {
-    if (event.turn > 0) allTurns.add(event.turn);
-  }
-  for (const turn of [...allTurns].sort((a, b) => a - b)) {
+  for (const turn of [...seenTurns].sort((a, b) => a - b)) {
     const callIds = toolsByTurn.get(turn) ?? [];
     const toolCalls = callIds
       .map(id => toolByCallId.get(id))
@@ -197,7 +237,20 @@ export function projectSessionTrace(sessionId: string, events: SessionEventRecor
     });
   }
 
-  return { sessionId, turns };
+  const projection: SessionTraceProjection = { sessionId, turns };
+  const nextSeed: SessionTraceSeed = {
+    version: 1,
+    lastEventId,
+    sessionCompleted,
+    tools: [...toolByCallId.values()].map(card => ({ ...card })),
+    turnMeta: [...turnMeta.entries()].map(([turn, meta]) => [turn, { ...meta }] as [number, SessionTraceTurnMeta]),
+    turns: [...seenTurns].sort((a, b) => a - b),
+  };
+  return { projection, seed: nextSeed };
+}
+
+export function projectSessionTrace(sessionId: string, events: SessionEventRecord[]): SessionTraceProjection {
+  return foldSessionTrace(sessionId, events).projection;
 }
 
 export function validateTraceCompleteness(

@@ -12,6 +12,7 @@ import { spawn, type ChildProcess, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { redactExternalSummaryText } from '../external-tool-summary.js';
+import { runtimeChildEnv } from '../runtime-env.js';
 import type { RuntimeHandle } from './types.js';
 import { resolveRuntimeCommand } from './command.js';
 
@@ -114,7 +115,7 @@ export function spawnCodex(input: CodexSpawnInput): CodexRuntimeHandle {
 
   const proc: ChildProcess = spawn(resolveRuntimeCommand(codexPath), ['exec', prompt, ...extraArgs], {
     cwd: workspaceRoot,
-    env: { ...process.env, ...otelEnv, ...extraEnv },
+    env: { ...runtimeChildEnv(extraEnv), ...otelEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
   });

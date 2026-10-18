@@ -5,6 +5,8 @@
  *
  * Data: GET /metrics/activity (L1 session_events evidence only).
  */
+import { formatClock, formatTimestamp } from '../ui';
+import { decimals, num } from '../components/format';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Activity as ActivityIcon, Layers } from 'lucide-react';
@@ -101,10 +103,10 @@ export function ActivityPanel() {
               {data.totals.peakBucket ? <em>{shortTime(data.totals.peakBucket)}</em> : null}
             </span>
             <span className="activity-total">
-              {t('ops.activity.agentMinutes')} <strong>{data.totals.totalAgentMinutes.toLocaleString()}</strong>
+              {t('ops.activity.agentMinutes')} <strong>{num(data.totals.totalAgentMinutes)}</strong>
             </span>
             <span className="activity-total">
-              {t('ops.activity.cost')} <strong>${data.totals.totalCostUsd.toFixed(4)}</strong>
+              {t('ops.activity.cost')} <strong>${decimals(data.totals.totalCostUsd, 4)}</strong>
             </span>
             <span className="activity-total">
               {t('ops.activity.sessions')} <strong>{data.totals.sessionCount}</strong>
@@ -122,7 +124,7 @@ export function ActivityPanel() {
                   type="button"
                   className={`activity-bar${isPeak ? ' is-peak' : ''}${isSelected ? ' is-selected' : ''}${bucket.activeSessions === 0 ? ' is-zero' : ''}`}
                   style={{ height: `${Math.round(height)}px` }}
-                  title={`${formatBucketTime(bucket.bucket)} · ${t('ops.activity.concurrent', { n: bucket.activeSessions })} · $${bucket.estimatedCostUsd.toFixed(4)}`}
+                  title={`${formatBucketTime(bucket.bucket)} · ${t('ops.activity.concurrent', { n: bucket.activeSessions })} · $${decimals(bucket.estimatedCostUsd, 4)}`}
                   onClick={() => setSelectedBucket(isSelected ? null : bucket.bucket)}
                   aria-label={`${formatBucketTime(bucket.bucket)} ${bucket.activeSessions}`}
                 />
@@ -152,7 +154,7 @@ export function ActivityPanel() {
                     </a>
                     <span>{t('ops.activity.sessionMeta', {
                       events: String(row.eventCount),
-                      cost: row.estimatedCostUsd.toFixed(4),
+                      cost: decimals(row.estimatedCostUsd, 4),
                     })}</span>
                   </li>
                 ))}
@@ -174,10 +176,10 @@ function selectSession(sessionId: string) {
 
 function formatBucketTime(bucket: string): string {
   const date = new Date(bucket);
-  return Number.isNaN(date.getTime()) ? bucket : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? bucket : formatTimestamp(date);
 }
 
 function shortTime(iso: string): string {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(date.getTime()) ? iso : formatClock(date);
 }

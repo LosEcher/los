@@ -7,7 +7,7 @@ import {
   type SessionEventRecord,
 } from './session-events.js';
 
-export type OperatorControlBoundary = 'before_turn' | 'after_completion';
+export type OperatorControlBoundary = 'before_turn' | 'after_completion' | 'mid_turn';
 
 export interface OperatorControlCursors {
   steering: number;
@@ -22,6 +22,13 @@ export interface ConsumeOperatorControlInput {
   boundary: OperatorControlBoundary;
   cursors: OperatorControlCursors;
   includeFollowups: boolean;
+  /**
+   * Optional predicate over steering events. Returning false stops consumption
+   * **at that event** (ordered), leaving it and everything after it for a later
+   * boundary. This is how mid-turn drain modes avoid stealing a
+   * `finish_current_turn` instruction from the turn boundary.
+   */
+  acceptSteering?: (event: SessionEventRecord) => boolean;
 }
 
 export interface ConsumedOperatorControl {
@@ -63,7 +70,14 @@ export async function consumeOperatorControlEvents(
   });
 
   const consumed: ConsumedOperatorControl[] = [];
+  let stoppedAtControl = false;
   for (const source of candidates) {
+    if (source.type === 'operator.steering' && input.boundary === 'mid_turn' && input.acceptSteering && !input.acceptSteering(source)) {
+      // Ordered stop: do not advance the cursor past a steering event this
+      // boundary refuses to consume.
+      stoppedAtControl = true;
+      break;
+    }
     if (source.type === 'operator.steering') nextCursors.steering = source.id;
     if (source.type === 'operator.followup') nextCursors.followup = source.id;
 
@@ -74,7 +88,10 @@ export async function consumeOperatorControlEvents(
   }
 
   const lastScannedId = events[events.length - 1]?.id;
-  if (lastScannedId !== undefined) {
+  // When consumption stopped at a control event this boundary refuses, the
+  // events behind it are still unclaimed: advancing the scan cursor would skip
+  // them forever.
+  if (lastScannedId !== undefined && !stoppedAtControl) {
     nextCursors.steering = Math.max(nextCursors.steering, lastScannedId);
     if (input.includeFollowups) {
       nextCursors.followup = Math.max(nextCursors.followup, lastScannedId);
@@ -135,6 +152,16 @@ function matchesTarget(event: SessionEventRecord, runSpecId?: string, taskRunId?
   const targetTaskRunId = optionalString(event.payload.taskRunId);
   return (!targetRunSpecId || targetRunSpecId === runSpecId)
     && (!targetTaskRunId || targetTaskRunId === taskRunId);
+}
+
+/**
+ * Drain modes that can be applied *inside* a turn, after the current tool batch.
+ * `finish_current_turn` (the recorded default) and `next_turn` are applied at the
+ * turn boundary by `before_turn`/`after_completion`, which is unchanged.
+ */
+export function isMidTurnDrain(event: SessionEventRecord): boolean {
+  const mode = optionalString(event.payload?.drainMode) ?? 'finish_current_turn';
+  return mode === 'immediate' || mode === 'finish_current_tool';
 }
 
 function controlMessage(event: SessionEventRecord, boundary: OperatorControlBoundary): Message | null {

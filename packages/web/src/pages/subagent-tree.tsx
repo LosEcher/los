@@ -7,6 +7,7 @@
  * duration. Click a node to jump to its child session. Design reference: DSH
  * ui-subagent catalog tree pattern.
  */
+import { decimals, num } from '../components/format';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
@@ -138,8 +139,8 @@ function TreeNode({
         {node.model ? <span className="subagent-model">{node.provider}/{node.model}</span> : null}
         <span className="subagent-meta">
           {node.durationMs !== null ? formatMs(node.durationMs) : '—'}
-          {node.usage.totalTokens > 0 ? ` · ${node.usage.totalTokens.toLocaleString()} tok` : ''}
-          {node.estimatedCostUsd > 0 ? ` · $${node.estimatedCostUsd.toFixed(4)}` : ''}
+          {node.usage.totalTokens > 0 ? ` · ${num(node.usage.totalTokens)} tok` : ''}
+          {node.estimatedCostUsd > 0 ? ` · $${decimals(node.estimatedCostUsd, 4)}` : ''}
         </span>
       </div>
       {hasChildren && expanded ? (
@@ -159,7 +160,7 @@ function countNodes(nodes: readonly SubagentTreeNode[]): number {
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${decimals(ms / 1000, 1)}s`;
   return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 }
 

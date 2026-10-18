@@ -138,17 +138,38 @@ export function RefreshQueryButton({ queryKey }: { queryKey: unknown[] }) {
 
 // ── Formatting helpers ──────────────────────────────────
 
-export function formatDate(value: string | undefined): string {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
+function toDate(value: string | number | Date): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
+export function formatDate(value: string | number | Date | undefined): string {
+  if (value === undefined || value === '') return '-';
+  const date = toDate(value);
+  if (!Number.isFinite(date.getTime())) return typeof value === 'string' ? value : '-';
   return date.toLocaleString(locale(), { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-export function formatTime(value: string | undefined): string {
-  if (!value) return '--:--:--';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
+/** 日期+时间，**复刻 `new Date(x).toLocaleString()` 的既有输出**（2026-10-17，B2b）。
+ *  不加它而去改各页用 `formatDate`，会改显示（丢秒、换月名）——B2b 是纯重构。 */
+export function formatTimestamp(value: string | number | Date): string {
+  return toDate(value).toLocaleString(locale());
+}
+
+/** 仅日期，复刻 `toLocaleDateString()` 的既有输出。 */
+export function formatDay(value: string | number | Date): string {
+  return toDate(value).toLocaleDateString(locale());
+}
+
+/** 时:分。改造前有一处传 `[]`（运行时默认 locale），这里统一用 `locale()`（UI 语言）——
+ *  这是刻意的修正：否则会出现"界面中文、时间英文"。 */
+export function formatClock(value: string | number | Date): string {
+  return toDate(value).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+}
+
+export function formatTime(value: string | number | Date | undefined): string {
+  if (value === undefined || value === '') return '--:--:--';
+  const date = toDate(value);
+  if (!Number.isFinite(date.getTime())) return typeof value === 'string' ? value : '--:--:--';
   return date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 

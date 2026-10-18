@@ -2,6 +2,7 @@
  * Session inspector components — event timeline, expandable events, turn groups.
  * Extracted from sessions-page.tsx to keep it under the 400-line module gate.
  */
+import { decimals } from '../components/format';
 import { useState } from 'react';
 import { formatTime } from '../ui.js';
 import { tt } from '../i18n';
@@ -132,7 +133,7 @@ export function truncateSummary(text: string, maxLen: number): string {
 }
 
 export function formatDurationCompact(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms >= 1000) return `${decimals(ms / 1000, 1)}s`;
   return `${ms}ms`;
 }
 

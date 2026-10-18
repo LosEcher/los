@@ -63,19 +63,46 @@ export interface ExecutorNodeRecord {
   execution: ExecutorNodeExecutionState;
 }
 
+/**
+ * 节点容量/负载快照（心跳上报）。
+ *
+ * ⚠️ **2026-10-12 按实测补齐**：本类型此前**既多又少** ——
+ *   · 多：`diskFreeGb` / `psiMemorySome` / `psiIoSome` 在活库 36 个节点里**一次都没出现过**
+ *     （而 web 端 `nodes-page.tsx` 的 `diskPressure()` 正在读 `diskFreeGb` ⇒ 磁盘压力显示
+ *     实际上一直是"未知"；这是采集缺口，不是命名问题）；
+ *   · 少：实际写入的 `cpuCores`/`cpuModel`/`cpuLoad1m`/`kernelVersion`/`sampledAt` 与
+ *     磁盘/网络计数（`diskReadBytes`/`diskWriteBytes`/`networkRxBytes`/`networkTxBytes`）
+ *     都不在类型里 ⇒ 消费方要么拿不到、要么得绕过类型（本次修的就是后者）。
+ * 真源 = 心跳载荷（packages/executor/src/executor-heartbeat.ts）+ 活库 `capacity_json` 的键并集。
+ * 三种"未采集"的旧字段保留为可选并标注，避免消费者以为它们一定有值。
+ */
 export interface ExecutorNodeCapacity {
+  // —— 每台节点都上报 ——
   pid?: number;
   arch?: string;
   platform?: string;
   memoryTotalMb?: number;
   memoryAvailableMb?: number;
+  // —— 按平台能力上报（Linux 侧 cgroup/PSI） ——
   swapTotalMb?: number;
   swapUsedMb?: number;
+  psiMemoryFull?: number;
+  psiIoFull?: number;
+  // —— 部分版本/平台上报 ——
+  cpuCores?: number;
+  cpuModel?: string;
+  cpuLoad1m?: number;
+  kernelVersion?: string;
+  sampledAt?: string;
+  // —— 采集面较新（目前仅个别节点） ——
+  diskReadBytes?: number;
+  diskWriteBytes?: number;
+  networkRxBytes?: number;
+  networkTxBytes?: number;
+  // —— 声明过但**实测从未写入**（保留以兼容既有读取方；见上方说明） ——
   diskFreeGb?: number;
   psiMemorySome?: number;
-  psiMemoryFull?: number;
   psiIoSome?: number;
-  psiIoFull?: number;
 }
 export interface ExecutorNodeExecutionState {
   candidate: boolean;

@@ -567,6 +567,7 @@ test('tool capability timeout is enforced during execution', async () => {
       },
     },
     {
+      scope: [],
       riskLevel: 'L0',
       timeoutMs: 5,
       retryable: true,
@@ -610,6 +611,7 @@ test('tool retry only applies to retryable and idempotent capabilities', async (
       },
     },
     {
+      scope: [],
       riskLevel: 'L0',
       retryable: true,
       idempotent: true,
@@ -648,7 +650,7 @@ test('tool retry stops at max attempts and returns every exhausted failure', asy
         parameters: { type: 'object', properties: {} },
       },
     },
-    { riskLevel: 'L0', retryable: true, idempotent: true, timeoutMs: 1_000 },
+    { scope: [], riskLevel: 'L0', retryable: true, idempotent: true, timeoutMs: 1_000 },
   );
 
   const result = await registry.execute({ name: 'exhausted_read', arguments: {} });
@@ -690,6 +692,7 @@ test('tool retry does not replay non-idempotent capabilities', async () => {
       },
     },
     {
+      scope: [],
       riskLevel: 'L1',
       retryable: true,
       idempotent: false,

@@ -61,8 +61,10 @@ export function resolveToolPolicy(
   toolMode: 'all' | 'project-write' | 'read-only',
   retry: AgentConfig['toolRetry'] | undefined,
   sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox',
+  deniedPermissions?: readonly string[],
 ) {
   const normalizedRetry = normalizeToolRetry(retry);
+  const denied = deniedPermissions && deniedPermissions.length > 0 ? [...deniedPermissions] : undefined;
 
   // sandboxMode 'readonly' overrides toolMode: no writes, no shell, no sandbox
   if (sandboxMode === 'readonly') {
@@ -70,6 +72,7 @@ export function resolveToolPolicy(
       maxRiskLevel: 'L0' as const,
       allowWrites: false,
       sandboxAvailable: false,
+      deniedPermissions: denied,
       retry: normalizedRetry,
     };
   }
@@ -80,6 +83,7 @@ export function resolveToolPolicy(
       maxRiskLevel: 'L1' as const,
       allowWrites: true,
       sandboxAvailable: false,
+      deniedPermissions: denied,
       retry: normalizedRetry,
     };
   }
@@ -98,6 +102,7 @@ export function resolveToolPolicy(
       maxRiskLevel: 'L2' as const,
       allowWrites: true,
       sandboxAvailable,
+      deniedPermissions: denied,
       retry: normalizedRetry,
     };
   }
@@ -108,6 +113,7 @@ export function resolveToolPolicy(
       maxRiskLevel: 'L0' as const,
       allowWrites: false,
       sandboxAvailable: false,
+      deniedPermissions: denied,
       retry: normalizedRetry,
     };
   }
@@ -117,6 +123,7 @@ export function resolveToolPolicy(
     maxRiskLevel: 'L2' as const,
     allowWrites: true,
     sandboxAvailable: true,
+    deniedPermissions: denied,
     retry: normalizedRetry,
   };
 }

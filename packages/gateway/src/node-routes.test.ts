@@ -4,12 +4,17 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import Fastify from 'fastify';
 
+import { createHash } from 'node:crypto';
+import { getDb } from '@los/infra/db';
+
 import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
 import type { NodeRouteDependencies } from './routes/infrastructure/node-routes.js';
+import { _credentialExpiryWarning } from './node-credential-expiry.js';
 import {
   ensureNodeEnrollmentStore,
   issueNodeEnrollmentToken,
   redeemNodeEnrollmentToken,
+  verifyNodeCredential,
 } from '@los/agent/node-enrollment';
 
 // ── Stub deps: in-memory executor node store, no DB ──
@@ -258,6 +263,181 @@ test('node heartbeat validates the per-node credential when present (ADR 0048 B3
   } finally {
     await app.close();
   }
+});
+
+test('enrollment stores a 30-day expiry and expired credentials are refused (C.2 第 3 条)', async () => {
+  await ensureNodeEnrollmentStore();
+  const stamp = Date.now();
+  const nodeId = `test-cred-ttl-${stamp}`;
+  const token = await issueNodeEnrollmentToken(nodeId);
+
+  const app = Fastify({ logger: false });
+  registerNodeRoutes(app, stubDeps);
+  try {
+    const enrolled = await app.inject({
+      method: 'POST',
+      url: '/nodes/enroll',
+      payload: { token: token.token, nodeId },
+    });
+    assert.equal(enrolled.statusCode, 200);
+    const body = enrolled.json() as { credential: string; expiresAt: string };
+    const remainingDays = (new Date(body.expiresAt).getTime() - Date.now()) / (24 * 60 * 60_000);
+    assert.ok(remainingDays > 29 && remainingDays <= 30.1, `default TTL must be ~30d, got ${remainingDays}d`);
+
+    const verified = await verifyNodeCredential(body.credential);
+    assert.equal(verified?.nodeId, nodeId);
+    assert.equal(verified?.expiresAt, body.expiresAt, 'stored expiry must be the one returned to the node');
+
+    const beat = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': body.credential },
+      payload: { nodeId },
+    });
+    assert.equal(beat.statusCode, 200);
+
+    // An already-expired credential must stop authenticating — not just report an old date.
+    const expiredNodeId = `test-cred-expired-${stamp}`;
+    const expiredToken = await issueNodeEnrollmentToken(expiredNodeId);
+    const expired = await redeemNodeEnrollmentToken(expiredToken.token, expiredNodeId, -60_000);
+    assert.ok(expired);
+    assert.equal(await verifyNodeCredential(expired!.credential), null);
+    const expiredBeat = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': expired!.credential },
+      payload: { nodeId: expiredNodeId },
+    });
+    assert.equal(expiredBeat.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('node can rotate its own credential; the old value survives only the overlap window', async () => {
+  await ensureNodeEnrollmentStore();
+  const stamp = Date.now();
+  const nodeId = `test-cred-rotate-${stamp}`;
+  const token = await issueNodeEnrollmentToken(nodeId);
+  const first = await redeemNodeEnrollmentToken(token.token, nodeId);
+  assert.ok(first);
+
+  const app = Fastify({ logger: false });
+  registerNodeRoutes(app, stubDeps);
+  try {
+    const rotated = await app.inject({
+      method: 'POST',
+      url: '/nodes/credential/rotate',
+      headers: { 'x-los-node-credential': first!.credential },
+      payload: {},
+    });
+    assert.equal(rotated.statusCode, 200);
+    const body = rotated.json() as { nodeId: string; credential: string; expiresAt: string };
+    assert.equal(body.nodeId, nodeId);
+    assert.notEqual(body.credential, first!.credential);
+    assert.ok(new Date(body.expiresAt).getTime() > Date.now() + 29 * 24 * 60 * 60_000);
+
+    // Both values work during the overlap window: the old one for continuity,
+    // the new one as the active credential.
+    assert.equal((await verifyNodeCredential(first!.credential))?.nodeId, nodeId);
+    assert.equal((await verifyNodeCredential(body.credential))?.nodeId, nodeId);
+
+    // Heartbeat now reports the active expiry and no rotation pressure at 30d.
+    const beat = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': body.credential },
+      payload: { nodeId },
+    });
+    assert.equal(beat.statusCode, 200);
+    assert.equal(beat.json().credentialRotationDue, false);
+    assert.equal(beat.json().credentialExpiresAt, body.expiresAt);
+
+    // A restarted node that lost its state file still holds the old value; while the
+    // overlap window is open it must be able to rotate again (self-heal). The old
+    // value stays in the previous slot and its window is NOT extended.
+    const windowBefore = await getDb().query<{ previous_valid_until: Date }>(
+      'SELECT previous_valid_until FROM node_enrollments WHERE node_id = $1', [nodeId],
+    );
+    const reRotated = await app.inject({
+      method: 'POST',
+      url: '/nodes/credential/rotate',
+      headers: { 'x-los-node-credential': first!.credential },
+      payload: {},
+    });
+    assert.equal(reRotated.statusCode, 200);
+    const second = reRotated.json() as { credential: string; expiresAt: string };
+    assert.notEqual(second.credential, body.credential);
+    const windowAfter = await getDb().query<{ previous_valid_until: Date }>(
+      'SELECT previous_valid_until FROM node_enrollments WHERE node_id = $1', [nodeId],
+    );
+    assert.equal(
+      new Date(windowAfter.rows[0].previous_valid_until).toISOString(),
+      new Date(windowBefore.rows[0].previous_valid_until).toISOString(),
+      'rotating from the previous slot must not extend its window',
+    );
+    // The old value still authenticates; the newest value is the active one.
+    assert.equal((await verifyNodeCredential(first!.credential))?.nodeId, nodeId);
+    assert.equal((await verifyNodeCredential(second.credential))?.nodeId, nodeId);
+
+    // Once the overlap window closes, the old value must stop authenticating.
+    await getDb().query(
+      `UPDATE node_enrollments SET previous_valid_until = now() - interval '1 second' WHERE node_id = $1`,
+      [nodeId],
+    );
+    assert.equal(await verifyNodeCredential(first!.credential), null);
+    assert.equal((await verifyNodeCredential(second.credential))?.nodeId, nodeId);
+
+    // And a value past the window cannot rotate either.
+    const reRotateExpired = await app.inject({
+      method: 'POST',
+      url: '/nodes/credential/rotate',
+      headers: { 'x-los-node-credential': first!.credential },
+      payload: {},
+    });
+    assert.equal(reRotateExpired.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('legacy rows without expires_at are grandfathered to enrolled_at + 365d', async () => {
+  await ensureNodeEnrollmentStore();
+  const stamp = Date.now();
+  const freshNodeId = `test-cred-legacy-fresh-${stamp}`;
+  const ancientNodeId = `test-cred-legacy-old-${stamp}`;
+  const freshCredential = `legacy-fresh-${stamp}`;
+  const ancientCredential = `legacy-old-${stamp}`;
+  const hash = (v: string) => createHash('sha256').update(v).digest('hex');
+
+  await getDb().query(
+    `INSERT INTO node_enrollments (node_id, credential_hash, enrolled_at, expires_at)
+     VALUES ($1, $2, now() - interval '10 days', NULL),
+            ($3, $4, now() - interval '400 days', NULL)
+     ON CONFLICT (node_id) DO UPDATE
+       SET credential_hash = EXCLUDED.credential_hash,
+           enrolled_at = EXCLUDED.enrolled_at,
+           expires_at = NULL,
+           revoked_at = NULL`,
+    [freshNodeId, hash(freshCredential), ancientNodeId, hash(ancientCredential)],
+  );
+
+  const fresh = await verifyNodeCredential(freshCredential);
+  assert.equal(fresh?.nodeId, freshNodeId);
+  const remainingDays = (new Date(fresh!.expiresAt).getTime() - Date.now()) / (24 * 60 * 60_000);
+  assert.ok(remainingDays > 354 && remainingDays <= 355, `legacy expiry must be enrolled_at + 365d, got ${remainingDays}d`);
+
+  assert.equal(await verifyNodeCredential(ancientCredential), null, 'a legacy credential older than 365d must be rejected');
+});
+
+test('_credentialExpiryWarning: 7-day window, renders days, never warns in the past', () => {
+  const now = Date.parse('2026-10-18T00:00:00Z');
+  const at = (days: number) => new Date(now + days * 24 * 60 * 60_000).toISOString();
+
+  assert.equal(_credentialExpiryWarning('node-a', at(8), now), undefined);
+  assert.match(_credentialExpiryWarning('node-a', at(6.2), now)!, /node-a expires in 7d/);
+  assert.match(_credentialExpiryWarning('node-a', at(0.5), now)!, /expires in 1d/);
+  assert.equal(_credentialExpiryWarning('node-a', at(-1), now), undefined);
 });
 
 function listen(server: ReturnType<typeof createServer>): Promise<void> {

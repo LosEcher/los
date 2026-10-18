@@ -6,6 +6,7 @@ import { getDb } from '@los/infra/db';
 import { runAgent } from './loop.js';
 import {
   consumeOperatorControlEvents,
+  isMidTurnDrain,
   type OperatorControlCursors,
 } from './operator-control-consumer.js';
 import { recordOperatorFollowup, recordOperatorSteering } from './operator-control.js';
@@ -129,6 +130,74 @@ test('concurrent consumers cannot claim the same operator event twice', async ()
     assert.equal(results.reduce((sum, result) => sum + result.consumed.length, 0), 1);
     const events = await listSessionEvents(sessionId, 100);
     assert.equal(events.filter(event => event.type === 'operator.control.consumed').length, 1);
+  } finally {
+    await deleteSessionEvents(sessionId);
+  }
+});
+
+test('mid-turn drain applies a finish_current_tool steering inside the turn', async () => {
+  const sessionId = uniqueId('drain-mid');
+  try {
+    const event = await recordOperatorSteering({
+      sessionId,
+      instruction: 'Stop launching tools after this one.',
+      drainMode: 'finish_current_tool',
+    });
+    const mid = await consumeOperatorControlEvents({
+      sessionId,
+      turn: 1,
+      boundary: 'mid_turn',
+      cursors: emptyCursors(),
+      includeFollowups: false,
+      acceptSteering: isMidTurnDrain,
+    });
+    assert.equal(mid.consumed.length, 1);
+    assert.equal(mid.consumed[0]!.source.id, event.id);
+    assert.match(mid.consumed[0]!.message.content, /applied=mid_turn/);
+  } finally {
+    await deleteSessionEvents(sessionId);
+  }
+});
+
+test('mid-turn drain leaves a turn-boundary steering (and everything behind it) for the boundary', async () => {
+  const sessionId = uniqueId('drain-order');
+  try {
+    await recordOperatorSteering({
+      sessionId,
+      instruction: 'Finish the current turn first.',
+      drainMode: 'finish_current_turn',
+    });
+    await recordOperatorSteering({
+      sessionId,
+      instruction: 'Then stop after this tool.',
+      drainMode: 'finish_current_tool',
+    });
+
+    const mid = await consumeOperatorControlEvents({
+      sessionId,
+      turn: 1,
+      boundary: 'mid_turn',
+      cursors: emptyCursors(),
+      includeFollowups: false,
+      acceptSteering: isMidTurnDrain,
+    });
+    // The first pending steering is a turn-boundary one: mid-turn must stop at
+    // it, consume nothing, and leave the cursor where it was.
+    assert.equal(mid.consumed.length, 0);
+    assert.equal(mid.cursors.steering, 0);
+
+    const boundary = await consumeOperatorControlEvents({
+      sessionId,
+      turn: 1,
+      boundary: 'before_turn',
+      cursors: mid.cursors,
+      includeFollowups: false,
+    });
+    // At the boundary both are applied in order; the mid-turn-only one is not
+    // stranded just because it missed its window.
+    assert.equal(boundary.consumed.length, 2);
+    assert.match(boundary.consumed[0]!.message.content, /Finish the current turn first/);
+    assert.match(boundary.consumed[1]!.message.content, /Then stop after this tool/);
   } finally {
     await deleteSessionEvents(sessionId);
   }

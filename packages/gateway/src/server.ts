@@ -25,6 +25,7 @@ import { registerLogRoutes } from './routes/infrastructure/log-routes.js';
 import { registerArtifactRoutes } from './routes/tools/artifact-routes.js';
 import { registerNodeCommandRoutes } from './routes/orchestration/node-command-routes.js';
 import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
+import { registerTopologyRoutes } from './routes/infrastructure/topology-routes.js';
 import { registerServiceRoutes } from './routes/infrastructure/service-routes.js';
 import { registerMCPRoutes } from './routes/tools/mcp-routes.js';
 import { registerSkillRoutes } from './routes/tools/skill-routes.js';
@@ -231,6 +232,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerGovernanceRoutes(app);
   registerAuthRoutes(app, { config });
   registerNodeRoutes(app);
+  registerTopologyRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);

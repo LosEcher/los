@@ -1,3 +1,4 @@
+import { formatDay } from '../ui';
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Save, Monitor, Moon, Sun } from 'lucide-react';
@@ -314,7 +315,7 @@ export function SettingsPage() {
                       {p.projectId === defaultProjectId ? <span className="default-badge">{t('pages.settings.defaultBadge')}</span> : null}
                     </td>
                     <td className="project-path-cell" title={p.workspacePath}>{p.workspacePath}</td>
-                    <td className="text-dim">{p.lastUsed ? new Date(p.lastUsed).toLocaleDateString() : '—'}</td>
+                    <td className="text-dim">{p.lastUsed ? formatDay(p.lastUsed) : '—'}</td>
                     <td>
                       <button type="button" className="ghost-btn"
                         title={t('pages.settings.removeProjectTitle')}

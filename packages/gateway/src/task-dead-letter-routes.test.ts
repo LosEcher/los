@@ -30,6 +30,7 @@ const stubDeps: TaskRouteDependencies = {
   },
   appendSessionEvent: async (_input: any) => ({ id: 1 }) as any,
   cancelScheduledTask: (_id: string, _reason?: string) => false,
+  heartbeatTaskRun: async () => null as any,
   listDeadLetterEvents: async (_opts?: any) => Array.from(deadLetterStore.values()) as any,
   listServiceInstances: async (_limit?: number) => [] as any,
   listTaskRuns: async (_limit?: number) => [] as any,
@@ -49,6 +50,7 @@ const stubDeps: TaskRouteDependencies = {
     byResolution: {},
     recentEvent: null,
   }) as any,
+  taskTokenSecret: () => undefined,
   transitionExecutionState: async (_input: any) => ({} as any),
   updateTaskRunFields: async (_id: string, _fields: any) => ({} as any),
 };

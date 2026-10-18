@@ -190,6 +190,7 @@ export function registerSearchContentTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 60_000,
@@ -253,6 +254,7 @@ export function registerSearchFilesTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,
@@ -321,6 +323,7 @@ export function registerGlobTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['workspace:read'],
     timeoutMs: 30_000,

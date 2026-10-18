@@ -203,5 +203,8 @@ export const enAssets2 = {
   'assets.topology.unavailable': 'No evidence graph for this run yet.',
   'assets.topology.svgAria': 'Execution evidence graph',
   'assets.topology.collapsed': '+{count} events / tool states / verifications (collapsed)',
+  'assets.topology.placement': 'ran on: {nodes} · provider: {providers}',
+  'assets.topology.placementMissing': 'no placement recorded ({count} task runs without node_id)',
+  'assets.topology.foldedGroups': 'folded into {groups} groups · {rewritten} edges rewritten ({internal} merged inside groups)',
   'assets.topology.hint': 'Select a node to inspect its record.',
 } as const;
