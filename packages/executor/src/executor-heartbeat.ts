@@ -76,6 +76,7 @@ export async function heartbeatNode(
    * "no `+b`" can be counted as `unpinned` rather than as drift.
    */
   versionSource: NodeVersionSource = 'unversioned',
+  fileSyncEnabled = true,
 ): Promise<HeartbeatResponse> {
   const capabilities: Record<string, unknown> = {
     run_agent: lifecycle.acceptingTasks,
@@ -85,8 +86,9 @@ export async function heartbeatNode(
     workspace_write: true,
     artifact_transfer: true,
     node_command_runner: true,
-    file_sync_scan: true,
-    file_sync_deep_verify: true,
+    file_sync_scan: fileSyncEnabled,
+    file_sync_deep_verify: fileSyncEnabled,
+    file_sync_enabled: fileSyncEnabled,
     shell: true,
     // Provenance of the `version` field above. `package_json` means this node is
     // running an unpinned build, not that it drifts from its declared target.
