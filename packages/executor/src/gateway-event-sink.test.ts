@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile, mkdir, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionEventRecord } from '@los/agent';
-import { GatewayEventSink, replayGatewayEventSpool } from './gateway-event-sink.js';
+import { GatewayEventSink, countEventSpool, _pruneEventSpool, replayGatewayEventSpool } from './gateway-event-sink.js';
 
 function event(): SessionEventRecord {
   return {
@@ -63,6 +63,43 @@ test('event spool replay uses a node credential and removes acknowledged files',
     assert.equal(sent, 1);
     assert.equal(credential, 'node-cred');
     assert.equal((await readdir(taskDir)).length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('spool quota limits files and health count reflects backlog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'los-event-quota-'));
+  try {
+    const sink = new GatewayEventSink({
+      gatewayUrl: 'http://gateway.local', taskRunId: 'task-q', getToken: () => 'tok', spoolRoot: dir,
+      spoolMaxFiles: 1,
+    });
+    await sink.enqueue(event());
+    await sink.enqueue({ ...event(), id: 2 });
+    sink.dispose();
+    assert.equal(sink.spoolBacklog, 1);
+    assert.equal(sink.spoolDropped, 1);
+    assert.equal(await countEventSpool(dir), 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pruneEventSpool removes only expired spool files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'los-event-prune-'));
+  const taskDir = join(dir, 'task-p');
+  await mkdir(taskDir, { recursive: true });
+  const oldFile = join(taskDir, 'old.json');
+  const newFile = join(taskDir, 'new.json');
+  await writeFile(oldFile, '{}', 'utf8');
+  await writeFile(newFile, '{}', 'utf8');
+  const old = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  await utimes(oldFile, old, old);
+  try {
+    assert.equal(await _pruneEventSpool(dir, 7 * 24 * 60 * 60_000), 1);
+    assert.equal(await countEventSpool(dir), 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
