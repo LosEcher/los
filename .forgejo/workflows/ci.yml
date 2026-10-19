@@ -69,6 +69,9 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
+        # Bound the known registry/proxy stall: a hung install must fail the
+        # step in 8m instead of occupying a runner slot until the job timeout.
+        timeout-minutes: 8
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Observe pnpm store capacity
@@ -176,6 +179,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.path-gate.outputs.skip_heavy != 'true'
+        timeout-minutes: 8
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Test agent (3 groups parallel)
@@ -298,6 +302,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.path-gate.outputs.skip_heavy != 'true'
+        timeout-minutes: 8
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Test Web operator paths
@@ -369,6 +374,9 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
+        # Bound the known registry/proxy stall: a hung install must fail the
+        # step in 8m instead of occupying a runner slot until the job timeout.
+        timeout-minutes: 8
         run: pnpm install --frozen-lockfile --prefer-offline
 
       # Migration-drift gate. Unset NODE_ENV/TEST_DATABASE_URL so initDb's test
