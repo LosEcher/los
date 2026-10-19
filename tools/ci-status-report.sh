@@ -220,8 +220,10 @@ print("Notes:")
 print("- wall = max(end)-min(start) across jobs in the run (parallel).")
 print("- Forgejo jobs/*/logs may return stale bodies; prefer commit status +")
 print("  workflow failure-tail steps in .forgejo/workflows/ci.yml.")
-print("- Green baseline (2026-08-09 samples): wall ~3.6–6.0m; gate-test ~3.6–4.9m;")
+print("- Historical baseline (2026-08-09 samples): wall ~3.6–6.0m; gate-test ~3.6–4.9m;")
 print("  gate-fast ~2.1–3.2m; gate-web-e2e ~1.1–1.9m; gate-drift ~0.4–1.1m.")
+print("- 2026-10-19 baseline after the egress repair and gate-test parallelization:")
+print("  wall median ~5.8m; gate-test ~7.0m; gate-fast ~2.6m; web-e2e ~1.5m; drift ~0.7m.")
 print("- Trend: bash tools/ci-status-report.sh --trend 30")
 
 if os.environ.get("RECORD", "1") == "1":

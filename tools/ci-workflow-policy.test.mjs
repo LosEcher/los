@@ -110,3 +110,49 @@ test('GitHub gate-test heavy steps skip on mirror/* heads (mirror-PR lane)', asy
     'resource observation must still run on non-mirror failures but skip on mirror heads',
   );
 });
+
+test('Forgejo installs are bounded and preceded by the registry egress preflight', async () => {
+  const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
+
+  for (const [jobName, job] of Object.entries(forgejo.jobs)) {
+    const installIndex = job.steps.findIndex((step) => step.name === 'Install dependencies');
+    if (installIndex === -1) continue;
+
+    const install = job.steps[installIndex];
+    assert.equal(install['timeout-minutes'], 8, `${jobName} install must be bounded to 8m`);
+
+    const preflight = job.steps[installIndex - 1];
+    assert.equal(
+      preflight?.name,
+      'CI egress preflight (registry)',
+      `${jobName} install must be preceded by the egress preflight`,
+    );
+    assert.equal(preflight['timeout-minutes'], 1, `${jobName} preflight must be bounded to 1m`);
+    assert.match(String(preflight.run), /curl .*registry\.npmjs\.org/, `${jobName} preflight must probe the registry`);
+
+    if (jobName === 'gate-test' || jobName === 'gate-web-e2e') {
+      assert.equal(preflight.if, SKIP_IF, `${jobName} preflight must follow the path gate`);
+    } else {
+      assert.equal(preflight.if, undefined, `${jobName} preflight must always run`);
+    }
+  }
+});
+
+test('Forgejo gate-test runs packages concurrently with the agent groups', async () => {
+  const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
+  const steps = forgejo.jobs['gate-test'].steps;
+
+  assert.equal(
+    steps.some((step) => step.name === 'Test other packages'),
+    false,
+    'packages must not be a separate sequential gate-test step',
+  );
+
+  const agent = steps.find((step) => step.id === 'test-agent');
+  assert.ok(agent, 'gate-test must keep the test-agent step');
+  const run = String(agent.run);
+  assert.match(run, /LOS_TEST_GROUP=3/, 'agent group 3 must still run');
+  assert.match(run, /--filter '@los\/\*' --filter '!@los\/agent' test/, 'packages suite must run in the same step');
+  assert.match(run, /PID4=\$\!/, 'packages must be a fourth background pipeline');
+  assert.match(run, /\[ \$S1 -eq 0 \] && \[ \$S2 -eq 0 \] && \[ \$S3 -eq 0 \] && \[ \$S4 -eq 0 \]/, 'all four exit statuses must be required');
+});
