@@ -68,6 +68,18 @@ jobs:
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
+      - name: CI egress preflight (registry)
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          proxy="${HTTPS_PROXY:-${https_proxy:-}}"
+          no_proxy="${NO_PROXY:-${no_proxy:-}}"
+          echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+            || { echo "registry preflight failed (curl exit $?)"; exit 1; }
+          [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
+          echo "registry preflight ok"
+
       - name: Install dependencies
         # Bound the known registry/proxy stall: a hung install must fail the
         # step in 8m instead of occupying a runner slot until the job timeout.
@@ -176,6 +188,19 @@ jobs:
       - name: Verify jj runtime
         if: steps.path-gate.outputs.skip_heavy != 'true'
         run: jj --version
+
+      - name: CI egress preflight (registry)
+        if: steps.path-gate.outputs.skip_heavy != 'true'
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          proxy="${HTTPS_PROXY:-${https_proxy:-}}"
+          no_proxy="${NO_PROXY:-${no_proxy:-}}"
+          echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+            || { echo "registry preflight failed (curl exit $?)"; exit 1; }
+          [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
+          echo "registry preflight ok"
 
       - name: Install dependencies
         if: steps.path-gate.outputs.skip_heavy != 'true'
@@ -300,6 +325,19 @@ jobs:
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
+      - name: CI egress preflight (registry)
+        if: steps.path-gate.outputs.skip_heavy != 'true'
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          proxy="${HTTPS_PROXY:-${https_proxy:-}}"
+          no_proxy="${NO_PROXY:-${no_proxy:-}}"
+          echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+            || { echo "registry preflight failed (curl exit $?)"; exit 1; }
+          [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
+          echo "registry preflight ok"
+
       - name: Install dependencies
         if: steps.path-gate.outputs.skip_heavy != 'true'
         timeout-minutes: 8
@@ -372,6 +410,18 @@ jobs:
           done
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: CI egress preflight (registry)
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          proxy="${HTTPS_PROXY:-${https_proxy:-}}"
+          no_proxy="${NO_PROXY:-${no_proxy:-}}"
+          echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+            || { echo "registry preflight failed (curl exit $?)"; exit 1; }
+          [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
+          echo "registry preflight ok"
 
       - name: Install dependencies
         # Bound the known registry/proxy stall: a hung install must fail the
