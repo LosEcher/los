@@ -150,6 +150,10 @@ run 818: 10.15m (green)
   probe above is the revalidation command.
 - It does **not** schedule `ci-status-report`; the ledger is populated
   manually today. A periodic recorder remains a follow-up.
+- `ci-health-check.sh` now treats **completed slow runs** as opt-in
+  (`--include-slow`) instead of permanent `STUCK` errors; the default exit 1
+  is reserved for non-terminal stalls and `--include-failures`. Otherwise one
+  bad historical run would keep the watchdog red until five newer runs exist.
 - It does **not** change los runtime, nodes, or the B2 canary.
 
 ## 6. Adversarial review
