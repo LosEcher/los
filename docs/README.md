@@ -126,6 +126,10 @@ replaced it, the real-call outcomes wired into scoring, the executor's two compe
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
 
+Use `operations/2026-10-19-gate-test-parallelization.md` for the gate-test
+wall experiment: agent groups and packages now run concurrently, cutting the
+critical path from ~10.2m to ~7.0m (runs 1429/1430).
+
 Use `operations/2026-10-19-forgejo-runner-egress-repair-and-ci-timeouts.md`
 for the 2026-10-19 runner incident: job containers could not reach the npm
 registry because the injected proxy was on the Windows host loopback; the
