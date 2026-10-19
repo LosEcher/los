@@ -207,12 +207,13 @@ jobs:
         timeout-minutes: 8
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      - name: Test agent (3 groups parallel)
+      - name: Test agent groups + other packages (parallel)
         if: steps.path-gate.outputs.skip_heavy != 'true'
         id: test-agent
         run: |
           set -o pipefail
           AGENT_T0=$(date +%s)
+          PKG_T0=$(date +%s)
           mkdir -p /tmp/los-ci-logs
           echo "=== agent group 1/3 ===" && LOS_TEST_GROUP=1 pnpm --filter @los/agent test 2>&1 | tee /tmp/los-ci-logs/agent-g1.log | bash tools/check-known-failures.sh --allow-fixed &
           PID1=$!
@@ -220,25 +221,21 @@ jobs:
           PID2=$!
           echo "=== agent group 3/3 ===" && LOS_TEST_GROUP=3 pnpm --filter @los/agent test 2>&1 | tee /tmp/los-ci-logs/agent-g3.log | bash tools/check-known-failures.sh --allow-fixed &
           PID3=$!
+          # The packages suite was previously a sequential step after the agent
+          # groups. It has no dependency on them (separate schemas via
+          # ppid-pid), and running it concurrently is the 2026-10-19 wall
+          # experiment: 330s + 240s sequential vs ~158s concurrent locally.
+          echo "=== other packages (parallel with agent) ===" && ( pnpm --filter '@los/*' --filter '!@los/agent' test 2>&1 | tee /tmp/los-ci-logs/packages.log | bash tools/check-known-failures.sh --allow-fixed; rc=$?; echo "packages elapsed_sec=$(( $(date +%s) - PKG_T0 ))" > /tmp/los-ci-logs/packages-timing.txt; exit $rc ) &
+          PID4=$!
           wait $PID1; S1=$?
           wait $PID2; S2=$?
           wait $PID3; S3=$?
+          wait $PID4; S4=$?
           AGENT_T1=$(date +%s)
           echo "agent-groups elapsed_sec=$((AGENT_T1 - AGENT_T0))" | tee -a /tmp/los-ci-logs/timings.txt
-          [ $S1 -eq 0 ] && [ $S2 -eq 0 ] && [ $S3 -eq 0 ]
-        timeout-minutes: 12
-
-      - name: Test other packages
-        if: steps.path-gate.outputs.skip_heavy != 'true'
-        id: test-packages
-        run: |
-          set -o pipefail
-          PKG_T0=$(date +%s)
-          mkdir -p /tmp/los-ci-logs
-          pnpm --filter '@los/*' --filter '!@los/agent' test 2>&1 | tee /tmp/los-ci-logs/packages.log | bash tools/check-known-failures.sh --allow-fixed
-          PKG_T1=$(date +%s)
-          echo "packages elapsed_sec=$((PKG_T1 - PKG_T0))" | tee -a /tmp/los-ci-logs/timings.txt
-        timeout-minutes: 10
+          cat /tmp/los-ci-logs/packages-timing.txt | tee -a /tmp/los-ci-logs/timings.txt
+          [ $S1 -eq 0 ] && [ $S2 -eq 0 ] && [ $S3 -eq 0 ] && [ $S4 -eq 0 ]
+        timeout-minutes: 15
 
       - name: Enforce critical module coverage
         if: steps.path-gate.outputs.skip_heavy != 'true'
