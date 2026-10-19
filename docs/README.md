@@ -126,6 +126,11 @@ replaced it, the real-call outcomes wired into scoring, the executor's two compe
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
 
+Use `operations/2026-10-19-stateless-promote-fix.md` for the follow-up that
+made `promote`/`drain` gateway-side control-plane commands, so stateless nodes
+(no `getDb()`) no longer return 500 from their command endpoint; includes the
+node34 live promote and the gateway restart evidence.
+
 Use `operations/2026-10-19-b2-canary-rollout.md` for the node34 B2 canary
 rollout: target digest `b191b9d28dac2`, live `run_shell` denial with
 `enforcementMode=block`, rollback artifacts, and the finding that
