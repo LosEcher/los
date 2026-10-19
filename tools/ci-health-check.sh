@@ -9,6 +9,7 @@
 #   source .env                       # FORGEJO_TOKEN
 #   bash tools/ci-health-check.sh                     # stuck/queued only
 #   bash tools/ci-health-check.sh --include-failures  # + run-level failures
+#   bash tools/ci-health-check.sh --include-slow      # + completed slow runs
 #   bash tools/ci-health-check.sh --wall-min 15 --queue-min 30 --recent 5
 #
 # Integration notes:
@@ -42,19 +43,21 @@ WALL_MIN=15
 QUEUE_MIN=30
 RECENT=5
 INCLUDE_FAILURES=0
+INCLUDE_SLOW=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --wall-min) WALL_MIN="${2:?value required}"; shift 2 ;;
     --queue-min) QUEUE_MIN="${2:?value required}"; shift 2 ;;
     --recent) RECENT="${2:?value required}"; shift 2 ;;
     --include-failures) INCLUDE_FAILURES=1; shift ;;
+    --include-slow) INCLUDE_SLOW=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 FORGEJO_URL="$FORGEJO_URL" FORGEJO_TOKEN="$FORGEJO_TOKEN" \
 WALL_MIN="$WALL_MIN" QUEUE_MIN="$QUEUE_MIN" RECENT="$RECENT" \
-INCLUDE_FAILURES="$INCLUDE_FAILURES" python3 - <<'PY'
+INCLUDE_FAILURES="$INCLUDE_FAILURES" INCLUDE_SLOW="$INCLUDE_SLOW" python3 - <<'PY'
 import json, os, sys
 from datetime import datetime
 from collections import defaultdict
@@ -65,6 +68,7 @@ wall_min = float(os.environ["WALL_MIN"])
 queue_min = float(os.environ["QUEUE_MIN"])
 recent = int(os.environ["RECENT"])
 include_failures = os.environ["INCLUDE_FAILURES"] == "1"
+include_slow = os.environ["INCLUDE_SLOW"] == "1"
 
 def get(path):
     import urllib.request
@@ -89,9 +93,10 @@ for t in tasks.get("workflow_runs") or []:
 now = datetime.now().astimezone()
 anomalies = []
 
-# 1) stuck runs: finished runs whose wall exceeded the threshold. Scoped to
-# the most recent RECENT finished runs — earlier history (runs < 620) had
-# 24-48h walls as the pre-burst-runner norm and is not actionable alerting.
+# 1) slow finished runs: opt-in only. A completed run with a long wall is a
+# metric anomaly (see ci-status-report --trend), not an active stuck incident;
+# defaulting it to exit 1 would keep the watchdog red forever after one bad
+# run. `--include-slow` restores the old alerting view.
 finished = []
 for rn, items in runs.items():
     if any(t["status"] not in ("success", "failure", "cancelled", "skipped") for t in items):
@@ -104,11 +109,12 @@ for rn, items in runs.items():
     finished.append((rn, wall, failed, title))
 
 recent_finished = sorted(finished, key=lambda x: -x[0])[:recent]
-for rn, wall, failed, title in recent_finished:
-    if wall > wall_min:
-        anomalies.append(
-            f"STUCK run {rn}: wall={wall:.0f}m (> {wall_min:.0f}m) {title}"
-        )
+if include_slow:
+    for rn, wall, failed, title in recent_finished:
+        if wall > wall_min:
+            anomalies.append(
+                f"SLOW run {rn}: wall={wall:.0f}m (> {wall_min:.0f}m) {title}"
+            )
 
 # 2) queued/stalled runs: non-terminal tasks that have been open too long.
 for t in tasks.get("workflow_runs") or []:
