@@ -15,6 +15,17 @@ Date: 2026-10-19
 Scope: the single `win-los-canary` runner (DESKTOP-R45553O) and the four CI
 jobs. No los runtime, node, or scheduler change.
 
+> **Partly superseded on 2026-10-28** — the proxy injection prescribed in §3.1
+> (portproxy `192.168.31.5:12081`) and §3.2 (`container.options` proxy env) was
+> **withdrawn**: job containers cannot reach that address at all (measured from
+> the same image: direct `200` in 0.77 s, through the proxy `curl (28)` after
+> 8 s), and the preflight no longer downloads a payload to prove reachability.
+> See `docs/operations/2026-10-28-forgejo-runner-proxy-removal-and-preflight-probe.md`
+> (commit:4d28b508). Still in force from this document: the
+> `Install dependencies` `timeout-minutes: 8` bound (§3.4) and the rest of the
+> incident reading (§2, §4, §6). The portproxy and firewall rule remain installed
+> on the host but are now unused.
+
 ## 1. Acceptance criteria (written before the repair)
 
 ### H1 — Job containers can reach the registry

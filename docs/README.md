@@ -134,7 +134,17 @@ Use `operations/2026-10-19-forgejo-runner-egress-repair-and-ci-timeouts.md`
 for the 2026-10-19 runner incident: job containers could not reach the npm
 registry because the injected proxy was on the Windows host loopback; the
 portproxy/firewall + `no_proxy` + rootful runner invocation, the 8-minute
-install bound, and the run 817→818 evidence.
+install bound, and the run 817→818 evidence. **Its proxy injection is partly
+superseded on 2026-10-28** (see the next entry); the install bound still stands.
+
+Use `operations/2026-10-28-forgejo-runner-proxy-removal-and-preflight-probe.md`
+for the 2026-10-28 reversal: the injected proxy address is unreachable from job
+containers (direct `200`/0.77 s vs proxy `curl (28)`/8 s, measured from the CI
+image), so the proxy env was removed from `container.options`; the preflight was
+restricted to `registry.npmjs.org/-/ping` because the old check downloaded a
+5.7 MB packument under an 8 s budget and therefore measured throughput, not
+reachability. Includes the runner-container-exited layer, the run 1668/1669 →
+1670 evidence, and the rollback points.
 
 Use `operations/2026-10-19-stateless-promote-fix.md` for the follow-up that
 made `promote`/`drain` gateway-side control-plane commands, so stateless nodes
