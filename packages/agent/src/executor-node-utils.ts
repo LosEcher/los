@@ -77,6 +77,18 @@ export function resolveExecutorEndpoint(
     ?? baseUrl;
 }
 
+/**
+ * 受治理节点命令端点（`/v1/nodes/:id/commands`）。
+ *
+ * 为什么单独成函数：同一条通道被两处用（requiredChecks 的 `createNodeCheckRunner`、
+ * S7 放置前的工作区探测），端点是 `connect_config.agent_http.commandUrl` 的**同一个键**
+ * ——散着读会漂。
+ */
+export function resolveExecutorCommandUrl(connectConfig: Record<string, unknown>): string | undefined {
+  const modeConfig = normalizeJsonObject(connectConfig.agent_http);
+  return normalizeOptionalString(modeConfig.commandUrl);
+}
+
 export function isWildcardExecutorUrl(value: string | undefined): boolean {
   if (!value) return false;
   try {

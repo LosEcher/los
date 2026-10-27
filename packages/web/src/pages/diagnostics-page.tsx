@@ -1,3 +1,5 @@
+import { formatTime, formatTimestamp } from '../ui';
+import { decimals } from '../components/format';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getJson } from '../api/index.js';
@@ -96,7 +98,7 @@ function SpanTreeView({ nodes, depth }: { nodes: SpanNode[]; depth: number }) {
           {node.toolName ? <span className="diag-span-meta">tool: {node.toolName}</span> : null}
           <span className="diag-span-meta">#{node.eventId}</span>
           {node.orphan ? <span className="status-pill live">{t('ops.diagnostics.orphanLabel')}</span> : null}
-          <span className="diag-span-time">{new Date(node.createdAt).toLocaleTimeString()}</span>
+          <span className="diag-span-time">{formatTime(node.createdAt)}</span>
           {node.children.length > 0 ? <SpanTreeView nodes={node.children} depth={depth + 1} /> : null}
         </div>
       ))}
@@ -162,7 +164,7 @@ export function DiagnosticsPage() {
                   {trace.sessionId ? <span>{t('ops.diagnostics.sessionShort', { id: trace.sessionId.slice(0, 12) })}</span> : null}
                   {trace.model ? <span>{trace.model}</span> : null}
                   <span>{t('ops.diagnostics.eventsLabel', { count: trace.eventCount })}</span>
-                  <span>{trace.startedAt ? new Date(trace.startedAt).toLocaleString() : ''}</span>
+                  <span>{trace.startedAt ? formatTimestamp(trace.startedAt) : ''}</span>
                 </div>
               </div>
             </button>
@@ -219,7 +221,7 @@ export function DiagnosticsPage() {
                       <span className={`status-pill ${item.source === 'provider' ? 'live' : 'ok'}`}>{item.source}</span>
                       <code>{item.type}</code>
                       {item.summary ? <span className="diag-timeline-summary">{item.summary}</span> : null}
-                      <span className="diag-span-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                      <span className="diag-span-time">{formatTime(item.timestamp)}</span>
                     </div>
                   ))}
                 </div>
@@ -306,10 +308,10 @@ export function DiagnosticsPage() {
                   <td>{h.totalCalls}</td>
                   <td>
                     <span style={{ color: h.successRate >= 95 ? 'var(--green)' : h.successRate >= 80 ? 'var(--yellow)' : 'var(--red)' }}>
-                      {h.successRate.toFixed(1)}%
+                      {decimals(h.successRate, 1)}%
                     </span>
                   </td>
-                  <td>{h.avgLatencyMs.toFixed(0)}ms</td>
+                  <td>{decimals(h.avgLatencyMs, 0)}ms</td>
                   <td>{h.repairCount > 0 ? <span className="status-pill live">{h.repairCount}</span> : '—'}</td>
                 </tr>
               ))}

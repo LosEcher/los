@@ -1,3 +1,4 @@
+import { decimals } from '../components/format';
 import { useState, useMemo, type ChangeEvent } from 'react';
 import { metadataText } from '../chat-helpers.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -426,7 +427,7 @@ export function MemoryPage() {
                   <code>{c.id.slice(0, 16)}...</code>
                   <span>{t('assets.memory.compactionSession', { id: String(c.sessionId ?? '').slice(0, 12) })}</span>
                   <span>{t('assets.memory.compactionEvidence', { count: c.evidenceCount ?? 0 })}</span>
-                  <span>{t('assets.memory.compactionConfidence', { percent: (Number(c.confidence) * 100).toFixed(0) })}</span>
+                  <span>{t('assets.memory.compactionConfidence', { percent: decimals(Number(c.confidence) * 100, 0) })}</span>
                   <span>{formatDate(c.createdAt)}</span>
                 </div>
                 <div className="compaction-summary">

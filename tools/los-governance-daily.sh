@@ -122,6 +122,21 @@ if [[ -n "$ROWS" ]]; then
 else
   echo "- 无"
 fi
+
+# 超龄未确认死信（控制面事实修复 §7）：只计数与分项，**不重放**。
+# 按 reason 拆开是刻意的：把 outbox_exhausted 和 lease_expired/max_attempts/
+# unrecoverable_error 加成一个总数之后，就再也看不出是哪条投递链在烂。
+# `outbox_exhausted` 由出箱第 8 次失败产生（迁移 065 / execution-outbox.ts）。
+DL_OLD_TOTAL=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days';")
+DL_OLD_OLDEST=$(q "SELECT COALESCE(to_char(min(created_at), 'YYYY-MM-DD HH24:MI'), '-') FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days';")
+if [[ "${DL_OLD_TOTAL:-0}" -gt 0 ]]; then
+  echo "- **超龄未确认死信（>7 天，未处置）**：${DL_OLD_TOTAL} 条，最老 ${DL_OLD_OLDEST}"
+  DL_OLD_BY_REASON=$(q "SELECT reason || ' | ' || count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days' GROUP BY reason ORDER BY count(*) DESC;")
+  table "reason | 条数" "$DL_OLD_BY_REASON"
+  echo "  （只报告；重放仍走操作者 API，本脚本不 requeue）"
+else
+  echo "- 超龄未确认死信（>7 天）：0"
+fi
 echo
 
 # ── 4. GA 升级 / 治理 todo ──────────────────────────────────
@@ -247,6 +262,24 @@ if [[ -n "$STALE_NODES" ]]; then
   echo "- **账本陈旧行（心跳 >7d）**："
   table "node_kind | 行数 | 心跳区间 | 原因" "${STALE_LINES[@]}"
 fi
+echo
+
+# ── 7a. phase 账本分桶（控制面事实修复 §6）──────────────────
+# 与 packages/agent/src/run-contract.ts 的 classifyPhaseLedger 是**同一个判据**的
+# 两个投影：这个只读 SQL 给日报看，那个给 audit 脚本与单测看。改一处必须同时改另一处，
+# 否则两台仪器会给出相反结论（2026-10-10 审计里 "succeeded 且 phase 不是 succeeded/completed"
+# 查出 0 行，而实际有 402 行 phase 为空——`NOT IN` 把 NULL 丢掉了）。
+#
+# 关键点：只读**原始** run_contract_json。归一化会把 "completed" 这类非法字符串丢掉，
+# 之后就会把调用方的写入缺陷伪装成历史缺口。
+echo "## 7a. phase 账本分桶（原始 run_contract_json）"
+PHASE_ILLEGAL=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json ? 'phase' AND COALESCE(run_contract_json->>'phase','') <> '' AND run_contract_json->>'phase' NOT IN ('created','discovering','discovery_ready','planning','plan_approved','executing','verifying','succeeded','blocked','failed','cancelled');")
+PHASE_REAL_DRIFT=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phase' IN ('created','discovering','discovery_ready','planning','plan_approved','executing','verifying','succeeded','blocked','failed','cancelled') AND ((status IN ('succeeded','failed','cancelled') AND run_contract_json->>'phase' IS DISTINCT FROM status) OR (run_contract_json->>'phase' IN ('succeeded','failed','cancelled') AND status IS DISTINCT FROM run_contract_json->>'phase') OR (status='running' AND run_contract_json->>'phase' IN ('created','discovering','discovery_ready','planning')) OR (status='blocked' AND run_contract_json->>'phase' IS DISTINCT FROM 'blocked'));")
+PHASE_LEGACY=$(q "SELECT count(*) FROM run_specs WHERE (NOT (run_contract_json ? 'phase') OR run_contract_json->>'phase' IS NULL) AND COALESCE(run_contract_json->>'phaseTracking','') <> 'exempt';")
+PHASE_EXEMPT=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phaseTracking' = 'exempt' AND COALESCE(run_contract_json->>'phaseExemptReason','') <> 'writer_omitted';")
+PHASE_OMITTED=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phaseExemptReason' = 'writer_omitted';")
+echo "- illegal_phase=${PHASE_ILLEGAL:-0}  real_drift=${PHASE_REAL_DRIFT:-0}  legacy_untracked=${PHASE_LEGACY:-0}  exempt=${PHASE_EXEMPT:-0}  exempt_unspecified=${PHASE_OMITTED:-0}"
+echo "  （legacy_untracked 是历史缺口，不改写；只有 real_drift 进 audit 脚本的修复候选）"
 echo
 
 # ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────

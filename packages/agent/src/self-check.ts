@@ -67,7 +67,11 @@ export async function runPostExecutionSelfCheck(
       gaps: [
         {
           condition: 'output',
-          detail: 'agent produced no meaningful output',
+          // 准确描述：2026-10-11 实测一个 16 字符的正确回答被写成"no meaningful output"，
+          // 事后只能靠翻事件才知道真实原因是长度阈值。
+          detail: input.agentOutput
+            ? `agent output too short to judge (${input.agentOutput.trim().length} < ${MIN_OUTPUT_CHARS} chars)`
+            : 'agent produced no output',
           suggestion: 're-run task with adjusted prompt or debug the agent loop',
         },
       ],

@@ -17,6 +17,7 @@ export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, typ
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
 export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledExecutorConfig, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
 export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
+export { listExecutorCapabilityRequirements, isExecutorCapabilityRequirement } from './scheduler/types.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export { billingPeriodAt, calculateCost, DEFAULT_CNY_PER_USD, estimateCost, MODEL_PROFILES, resolveModelCapabilityProfile, resolveModelProfile, summarizeModelProfile, type ApiShape, type BillingPeriod, type CachePolicy, type CostEstimate, type ModelCapabilityProfile, type ModelExecutionSummary, type ModelPricing, type ModelProfile, type ProviderProtocol, type ResolveModelProfileOptions, type SessionAffinity, type ToolCallRepairMode, type TransportHint, type VisionCapabilityMode } from './model-profiles.js';
@@ -42,6 +43,10 @@ export {
   type PlanningTransport,
 } from './planning-output.js';
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanRevisionSnapshot, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
+// Phase-ledger classification: the single predicate shared by the governance
+// report and tools/audit-run-state-drift.ts, so the two instruments cannot drift
+// apart (control-plane truth remediation §6).
+export { classifyPhaseLedger, type PhaseExemptReason, type PhaseLedgerBucket, type PhaseLedgerClassification, type PhaseTracking } from './run-contract.js';
 export { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, trimSpecForReview, type LoadedSpec, type LoadSpecsOptions, type SpecLayer } from './spec-loader.js';
 export {
@@ -89,7 +94,8 @@ export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAge
 export { backupManagedWorkspace, createManagedWorkspace, ensureManagedWorkspaceStore, getWorkspaceDiff, listManagedWorkspaces, loadManagedWorkspace, loadManagedWorkspaceDetail, releaseManagedWorkspace, workspaceRootForTask, type CreateManagedWorkspaceInput, type ListManagedWorkspacesOptions, type ManagedWorkspaceDetail, type ManagedWorkspaceEvent, type ManagedWorkspaceRecord, type ManagedWorkspaceRuntimeOptions, type ManagedWorkspaceStatus } from './managed-workspaces.js';
 export { getAgentTaskGraphCompletion, readAgentTaskGraph, summarizeAgentTaskGraph, type AgentTaskGraphBlockReason, type AgentTaskGraphCompletion, type AgentTaskGraphCompletionOptions, type AgentTaskGraphCompletionStatus, type AgentTaskGraphReadModel } from './agent-task-graph-read-model.js';
 export { cancelGovernedAgentTaskGraph, createGovernedAgentTaskGraph, integrateGovernedAgentTaskGraph, loadGovernedAgentTaskGraph, type CreateGovernedAgentTaskGraphInput, type GovernedAgentTaskGraphEvent, type GovernedAgentTaskGraphIntegrationStatus, type GovernedAgentTaskGraphRecord, type GovernedAgentTaskGraphStatus, type GovernedGraphWorkerInput } from './agent-task-graph/graph-control.js';
-export { ensureSchedulerDecisionLedgerStore, listSchedulerDecisions, recordSchedulerDecision, type ListSchedulerDecisionsOptions, type RecordSchedulerDecisionInput, type SchedulerDecisionKind, type SchedulerDecisionRecord } from './scheduler-decision-ledger.js';
+export { ensureSchedulerDecisionLedgerStore, listSchedulerDecisions, isSchedulerDecisionKind, recordSchedulerDecision, type ListSchedulerDecisionsOptions, type RecordSchedulerDecisionInput, type SchedulerDecisionKind, type SchedulerDecisionRecord } from './scheduler-decision-ledger.js';
+export { listSchedulerDecisionWindow, type ListSchedulerDecisionWindowOptions, type SchedulerDecisionWindow } from './scheduler-decision-window.js';
 export { buildExecutionStaticGraph, type BuildExecutionStaticGraphOptions, type ExecutionStaticEdge, type ExecutionStaticEdgeKind, type ExecutionStaticGraph, type ExecutionStaticNode, type ExecutionStaticNodeKind } from './execution-static-graph.js';
 export { readRuntimeEvidenceGraph, type ReadRuntimeEvidenceGraphOptions, type RuntimeEvidenceEdge, type RuntimeEvidenceEdgeKind, type RuntimeEvidenceGraph, type RuntimeEvidenceNode, type RuntimeEvidenceNodeKind, type RuntimeEvidenceRecord } from './runtime-evidence-graph.js';
 export { buildRunStateProjection, readRunStateProjection, type BuildRunStateProjectionInput, type RunStateAction, type RunStateBlocker, type RunStateBlockerKind, type RunStateProjection } from './run-state-vocabulary.js';
@@ -104,7 +110,7 @@ export { ensureStaticGraphBaselineStore, captureStaticGraphBaseline, getLatestBa
 export { ensureTaskRunStore, createTaskRun, findActiveTaskRunByDedupeKey, updateTaskRunFields, heartbeatTaskRun, recoverExpiredTaskRuns, recoverExpiredTaskRunsWithAdvisoryLock, recoverActiveTaskRunsForGateway, loadTaskRun, listTaskRuns, listTaskRunsByStatus, listTaskRunsForSession, listTaskRunsForRunSpec, claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun, type CreateTaskRunInput, type TaskRunRecoveryResult, type TaskRunRecord, type TaskRunStatus, type UpdateTaskRunFieldsInput } from './task-runs.js';
 export { ensureWorkerMessageStore, sendWorkerMessage, sendHeartbeat, recordWorkerAnswer, listMessagesForDispatch, listMessagesForTask, hasWorkerDone, type WorkerMessage, type WorkerMessageType, type WorkerMessagePayload, type SendWorkerMessageInput } from './worker-messages.js';
 export { ensureExecutorNodeStore, loadExecutorNode, listExecutorNodes, recordExecutorNodeProbe, upsertExecutorNode, upsertExecutorNodeHeartbeat, type ExecutorNodeHeartbeatInput, type ExecutorNodeConnectMode, type ExecutorNodeKind, type ExecutorNodeProbeInput, type ExecutorNodeRecord, type ExecutorNodeStatus, type ExecutorNodeUpsertInput } from './executor-nodes.js';
-export { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, verifyNodeCredential } from './node-enrollment.js';
+export { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, rotateNodeCredential, verifyNodeCredential } from './node-enrollment.js';
 export { clearCancellation, ensureCancellationStore, pollCancellation, requestCancellation, type CancellationRequest } from './cancellation.js';
 export { ensureServiceInstanceStore, evaluateServiceInstance, listServiceInstances, loadServiceInstance, upsertServiceInstance, upsertServiceInstanceHeartbeat, type ServiceInstanceHeartbeatInput, type ServiceInstanceKind, type ServiceInstanceReadiness, type ServiceInstanceRecord, type ServiceInstanceRole, type ServiceInstanceRolloutState, type ServiceInstanceStatus, type ServiceInstanceUpsertInput } from './service-instances.js';
 export { ensureSessionEventStore, appendSessionEvent, appendSessionEvents, listSessionEvents, listRecentSessionEvents, listSessionEventsSince, listSessionEventsBefore, getSessionObservability, projectSessionObservability, type SessionEventRecord, type SessionEventUsage, type SessionEventWrite, type SessionObservability } from './session-events.js';
@@ -118,11 +124,14 @@ export {
   updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
   claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
   previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
+  transitionScheduledWorkRun, recordScheduledRunOutcome,
+  attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
   type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
 } from './scheduled-work/index.js';
+export { createScheduleResultWorkItem } from './scheduled-work/result-work-item.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
-export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
+export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, listNodeCommandNames, isNodeCommandName, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureFleetRepairConfigStore } from './fleet-repair-config.js';
 export { ensureFleetAlertConfigStore } from './fleet-alert-config.js';
 export { ensureNodeRecoveryPolicyStore } from './node-recovery-policy.js';

@@ -6,6 +6,7 @@ import {
   upsertServiceInstance,
   type ServiceInstanceRecord,
 } from '@los/agent/service-instances';
+import { requireOperator } from '../../request-context.js';
 
 export type ServiceRoutesDependencies = {
   ensureServiceInstanceStore: typeof ensureServiceInstanceStore;
@@ -46,12 +47,14 @@ export function registerServiceRoutes(
     return readiness;
   });
 
-  app.get('/services', async () => {
+  app.get('/services', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     await deps.ensureServiceInstanceStore();
     return await deps.listServiceInstances();
   });
 
   app.get('/services/:id', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const service = await deps.loadServiceInstance(id);
     if (!service) return reply.status(404).send({ error: 'service instance not found' });
@@ -59,6 +62,7 @@ export function registerServiceRoutes(
   });
 
   app.post('/services/:id/drain', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as { reason?: string } | undefined;
     const existing = await deps.loadServiceInstance(id);
@@ -73,6 +77,7 @@ export function registerServiceRoutes(
   });
 
   app.post('/services/:id/promote', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as { reason?: string } | undefined;
     const existing = await deps.loadServiceInstance(id);

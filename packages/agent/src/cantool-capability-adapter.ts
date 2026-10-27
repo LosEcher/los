@@ -28,6 +28,12 @@ export interface MCPDiscoveredTool {
     destructiveHint?: boolean;
     idempotentHint?: boolean;
     openWorldHint?: boolean;
+    /**
+     * Open by design: MCP servers send hints we do not model yet, and the leaf
+     * package carries them as `Record<string, unknown>`. The index signature is
+     * what keeps the agent's descriptor assignable to the leaf's without a cast.
+     */
+    [key: string]: unknown;
   };
 }
 

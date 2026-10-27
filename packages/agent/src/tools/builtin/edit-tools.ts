@@ -140,6 +140,7 @@ export function registerMultiEditTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 30_000,
@@ -250,6 +251,7 @@ export function registerDeleteRangeTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 10_000,
@@ -341,6 +343,7 @@ export function registerDeleteSymbolTool(
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['workspace:write'],
     timeoutMs: 15_000,

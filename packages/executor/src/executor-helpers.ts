@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ArtifactPathPolicy, NodeCommandName } from '@los/agent';
+import { isNodeCommandName, type ArtifactPathPolicy, type NodeCommandName } from '@los/agent';
 
 export function readJson<T>(req: IncomingMessage): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -73,10 +73,8 @@ export function normalizePathPolicy(value: unknown): ArtifactPathPolicy | undefi
 }
 
 export function normalizeNodeCommand(value: unknown): NodeCommandName | undefined {
-  if (value === 'status' || value === 'probe' || value === 'drain' || value === 'promote' || value === 'restart' || value === 'upgrade' || value === 'rollback') {
-    return value;
-  }
-  return undefined;
+  // 单一清单在 @los/agent/node-commands；此处不再维护第二份（2026-10-11 收敛）
+  return isNodeCommandName(value) ? value : undefined;
 }
 
 export function createAbortError(reason: string): Error {

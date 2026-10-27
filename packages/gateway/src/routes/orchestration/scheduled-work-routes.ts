@@ -9,6 +9,7 @@ import {
   listScheduledWorkItems,
   loadScheduledWorkItem,
   previewScheduledOccurrences,
+  resetScheduledWorkCircuit,
   retryScheduledWorkRun,
   triggerScheduledWorkItem,
   updateScheduledWorkItem,
@@ -19,6 +20,10 @@ import {
 } from '@los/agent/scheduled-work';
 
 import { runIdempotentJson } from '../../idempotency.js';
+import { isExecutorCapabilityRequirement, listExecutorCapabilityRequirements } from '@los/agent';
+// 共享归一化：`read-only` 必须原样透传到 validateScheduledExecutionRunTemplate（由它 fail-loud 拒绝），
+// 不能像 2026-10-11 之前那样在本文件里静默改写成 project-write（= 静默提升写权限）。
+import { normalizeToolMode } from '../../chat-normalizers.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
 
 export type ScheduledWorkRouteDeps = {
@@ -30,6 +35,7 @@ export type ScheduledWorkRouteDeps = {
   preview: typeof previewScheduledOccurrences;
   trigger: typeof triggerScheduledWorkItem;
   retry: typeof retryScheduledWorkRun;
+  resetCircuit: typeof resetScheduledWorkCircuit;
   approve: typeof approveScheduledWorkRun;
   deny: typeof denyScheduledWorkRun;
   execute: typeof executeScheduledWorkRun;
@@ -39,7 +45,8 @@ const defaultDeps: ScheduledWorkRouteDeps = {
   create: createScheduledWorkItem, list: listScheduledWorkItems, load: loadScheduledWorkItem,
   update: updateScheduledWorkItem, listRuns: listScheduledWorkItemRuns,
   preview: previewScheduledOccurrences, trigger: triggerScheduledWorkItem,
-  retry: retryScheduledWorkRun, approve: approveScheduledWorkRun, deny: denyScheduledWorkRun, execute: executeScheduledWorkRun,
+  retry: retryScheduledWorkRun, resetCircuit: resetScheduledWorkCircuit,
+  approve: approveScheduledWorkRun, deny: denyScheduledWorkRun, execute: executeScheduledWorkRun,
 };
 
 export function registerScheduledWorkRoutes(
@@ -113,6 +120,32 @@ export function registerScheduledWorkRoutes(
         return schedule;
       } catch (error) {
         return reply.status(400).send({ error: errorMessage(error) });
+      }
+    });
+  });
+
+  /**
+   * 手动重置断路。存在的理由见 `resetScheduledWorkCircuit` 的注释：24h 自动恢复窗口
+   * 与"原因已修好"之间没有合规的手动手段，实测触发会被 `409 schedule circuit is open` 挡下。
+   *
+   * 只重置**资格**（circuit_state / consecutive_failures / circuit_opened_at），
+   * **不动 next_run_at** ⇒ 不会替操作者制造一次执行。要立刻跑就再调 `/trigger`。
+   * 幂等：已 closed 返回 `changed:false`。
+   */
+  app.post('/scheduled-work-items/:id/reset-circuit', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const context = getRequestContext(req);
+    return runIdempotentJson(req, reply, {
+      route: `/scheduled-work-items/${id}/reset-circuit`, method: 'POST', body, context,
+    }, async () => {
+      try {
+        const result = await deps.resetCircuit({ scheduleId: id });
+        return { scheduleId: id, changed: result.changed, circuitState: result.schedule.circuitState,
+          consecutiveFailures: result.schedule.consecutiveFailures, nextRunAt: result.schedule.nextRunAt };
+      } catch (error) {
+        return reply.status(errorMessage(error).includes('not found') ? 404 : 409).send({ error: errorMessage(error) });
       }
     });
   });
@@ -312,6 +345,27 @@ function normalizeStringArray(value: unknown): string[] {
   return [...new Set(value.map(v => typeof v === 'string' ? v.trim() : '').filter(Boolean))];
 }
 
+/**
+ * 数组字段的 **fail-loud** 版本（2026-10-11 实测踩到）。
+ *
+ * 为什么必须严格：`normalizeStringArray` 对"传了字符串而不是数组"**静默返回空数组**，
+ * 于是 `executor.nodeUrls`（唯一的**硬钉**机制）会被悄悄丢掉，任务退回软偏好——
+ * 调用方以为"只许派到某节点"已经生效，实际没有。这与本文件上面那条注释
+ * （不认识的能力名曾被静默过滤）是**同一个失效模式**：约束没生效，但没人被告知。
+ * 硬钉是安全边界，宁可 400 也不要静默降级。
+ */
+function normalizeStringArrayStrict(value: unknown, field: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array of strings`);
+  }
+  const invalid = value.filter(item => typeof item !== 'string' || !item.trim());
+  if (invalid.length > 0) {
+    throw new Error(`${field} must contain non-empty strings`);
+  }
+  return [...new Set((value as string[]).map(item => item.trim()))];
+}
+
 function normalizeMaxLoops(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   const parsed = Number(value);
@@ -319,10 +373,6 @@ function normalizeMaxLoops(value: unknown): number | undefined {
     throw new Error(`maxLoops must be an integer in [1,200], got: ${String(value)}`);
   }
   return Math.floor(parsed);
-}
-
-function normalizeToolMode(value: unknown): 'all' | 'project-write' {
-  return value === 'all' ? 'all' : 'project-write';
 }
 
 function normalizeSandboxMode(value: unknown): 'readonly' | 'workspace-write' | 'sandbox' | undefined {
@@ -350,28 +400,60 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('executor must be an object');
   }
-  const nodeUrls = normalizeStringArray(input.nodeUrls);
-  const requiredCapabilities = normalizeStringArray(input.requiredCapabilities)
-    .filter((c): c is ExecutorCapabilityRequirement => EXECUTOR_CAPABILITIES.includes(c as ExecutorCapabilityRequirement));
+  const nodeUrls = normalizeStringArrayStrict(input.nodeUrls, 'executor.nodeUrls');
+  // fail-loud（2026-10-11）：此前把不认识的能力名**静默过滤掉** ⇒ 调用方以为约束生效、
+  // 任务却可能落到不满足要求的节点上（连 artifact_transfer 这种跨设备必需能力也不在旧清单里）。
+  const requestedCapabilities = normalizeStringArray(input.requiredCapabilities);
+  const unknownCapabilities = requestedCapabilities.filter(name => !isExecutorCapabilityRequirement(name));
+  if (unknownCapabilities.length > 0) {
+    throw new Error(
+      `unknown executor capability: ${unknownCapabilities.join(', ')}; allowed: ${listExecutorCapabilityRequirements().join(', ')}`,
+    );
+  }
+  const requiredCapabilities = requestedCapabilities as ExecutorCapabilityRequirement[];
   const nodeId = normalizeString(input.nodeId);
-  const agentKey = normalizeString(input.agentKey);
+  const requiredNodeId = normalizeString(input.requiredNodeId);
+  if (input.requiredNodeId !== undefined && !requiredNodeId) {
+    throw new Error('executor.requiredNodeId must be a non-empty string');
+  }
+  // 2026-10-12：`executor.agentKey` **拒绝**，不再静默保存。
+  //
+  // 它是**执行器认证密钥**（`auth-middleware.ts` 用 `config.executor.agentKey` 校验
+  // 心跳与执行器模型路径），而派发时本来就从**网关配置**注入
+  // （`runner.ts` 的 `withExecutorKeyFromConfig`）⇒ 存进排程模板只是把一把活密钥
+  // 写进 `scheduled_work_items.run_template_json`（实测 9/82 行曾带明文，
+  // 且与当前机队 key 逐字相同）。
+  //
+  // 为什么不静默丢弃：那正是"声明 ≠ 生效"（调用方以为密钥生效、实际来自别处）。
+  // 全仓无任何调用方发送这个字段（runbooks/ tools/ scripts/ 均为 0 命中），
+  // 所以 fail-loud 不会打到既有自动化。
+  if (input.agentKey !== undefined) {
+    throw new Error(
+      'executor.agentKey is not accepted: the executor key is taken from gateway config '
+      + '(config.executor.agentKey) at dispatch time; persisting it would store a live '
+      + 'credential in scheduled_work_items.run_template_json',
+    );
+  }
+  // S7：放置策略与工作区策略同样 fail-loud（理由同 requiredCapabilities）——
+  // 拼错的策略名不该静默退化成默认值，否则调用方以为约束生效而实际没有。
+  const workspacePolicy = optionalEnum(input.workspacePolicy, ['verify', 'portable'] as const);
+  const placementPolicy = optionalEnum(
+    input.placementPolicy, ['health', 'verified-rotate'] as const,
+  );
   return {
     ...(input.enabled === undefined ? {} : { enabled: Boolean(input.enabled) }),
     ...(nodeId ? { nodeId } : {}),
+    ...(requiredNodeId ? { requiredNodeId } : {}),
     ...(nodeUrls.length > 0 ? { nodeUrls } : {}),
-    ...(agentKey ? { agentKey } : {}),
     ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
+    ...(workspacePolicy ? { workspacePolicy } : {}),
+    ...(placementPolicy ? { placementPolicy } : {}),
     ...(input.requiresBuild === undefined ? {} : { requiresBuild: Boolean(input.requiresBuild) }),
     ...(input.requiresDeploy === undefined ? {} : { requiresDeploy: Boolean(input.requiresDeploy) }),
     ...(normalizeNumber(input.leaseMs) ? { leaseMs: normalizeNumber(input.leaseMs) } : {}),
     ...(normalizeNumber(input.heartbeatMs) ? { heartbeatMs: normalizeNumber(input.heartbeatMs) } : {}),
   };
 }
-
-const EXECUTOR_CAPABILITIES: readonly string[] = [
-  'workspace_read', 'workspace_write', 'shell', 'sandbox', 'network_egress',
-  'heavy_task_safe', 'deploy_safe',
-];
 
 function normalizeFeedAnalysisRequest(value: unknown): ScheduledWorkRunTemplate['feedAnalysisRequest'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

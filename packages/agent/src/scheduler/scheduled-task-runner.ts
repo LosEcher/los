@@ -178,8 +178,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     input = { ...input, allowedTools: effectiveAllowedTools };
   }
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
-  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
-  const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));
+  // Gateway restarts can exceed 30s. Keep a restart budget so a healthy
+  // remote task is not reaped merely because the control plane bounced.
+  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 300_000;
+  const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? 60_000;
   const leaseVersion = normalizePositiveInteger(input.leaseVersion) ?? 1;
   const providerFallback = normalizeProviderFallbackPolicy(input.providerFallback);
   const initialFallbackTarget = resolveProviderFallbackInitialTarget(providerFallback, {
@@ -195,10 +197,21 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
 
   let executor: ResolvedExecutor | null;
   try {
-    executor = await resolveExecutor(input.executor, {
-      toolMode,
-      sandboxMode,
-    });
+    // 凭据回退（2026-10-11）：远端 smoke 实测"模板不带 agentKey ⇒ unauthorized"。
+    // 不应要求每个调用方各自持有 agent 密钥，网关用自身 EXECUTOR_AGENT_KEY 兜底。
+    executor = await resolveExecutor(
+      input.executor && !input.executor.agentKey
+        ? { ...input.executor, agentKey: getConfig().executor.agentKey }
+        : input.executor,
+      {
+        toolMode,
+        sandboxMode,
+        // S7：工作区进候选资格。任务自己声明 workspacePolicy，否则全局默认 verify。
+        workspaceRoot,
+        workspacePolicy: input.executor?.workspacePolicy,
+        placementPolicy: input.executor?.placementPolicy,
+      },
+    );
   } catch (error) {
     if (error instanceof _ExecutorSelectionError) {
       const metadata = readObject(input.metadata);
@@ -264,6 +277,9 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         executorUrl: executor.url,
         placementTier: executor.decision.placementTier,
         requiredCapabilities: executor.decision.requiredCapabilities,
+        // S7：把"为什么是它"一起落库（探测结果 + capacity 快照 + 轮转计数 + basis）。
+        // 只存引用与决定元数据，不存任务输出。
+        ...(executor.decision.selection ? { selection: executor.decision.selection } : {}),
       },
     });
   }

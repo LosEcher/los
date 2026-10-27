@@ -25,6 +25,7 @@ import { registerLogRoutes } from './routes/infrastructure/log-routes.js';
 import { registerArtifactRoutes } from './routes/tools/artifact-routes.js';
 import { registerNodeCommandRoutes } from './routes/orchestration/node-command-routes.js';
 import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
+import { registerTopologyRoutes } from './routes/infrastructure/topology-routes.js';
 import { registerServiceRoutes } from './routes/infrastructure/service-routes.js';
 import { registerMCPRoutes } from './routes/tools/mcp-routes.js';
 import { registerSkillRoutes } from './routes/tools/skill-routes.js';
@@ -46,6 +47,7 @@ import { ensureAllStores } from './bootstrap.js';
 import { registerChatRoute } from './chat-route.js';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
+import { getProcessIdentity } from './process-identity.js';
 import authMiddleware from './auth-middleware.js';
 import { registerSecurityHeaders } from './security-headers.js';
 import { createRateLimiter } from './rate-limit.js';
@@ -85,6 +87,7 @@ import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo
 import { getDefaultProjectId, getProject } from './project-store.js';
 import { getSymbolCacheMetrics } from './chat-cbm-symbol-cache.js';
 import { recoverApprovedRunDispatches } from './run-resume-recovery.js';
+import { registerRouteAdmissionGuard } from './route-admission-guard.js';
 
 const log = getLogger('gateway');
 const SERVICE_HEARTBEAT_MS = 10_000;
@@ -144,6 +147,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     clearInterval(chatLimiter.cleanupInterval);
   });
 
+  // Startup reconciliation of the real route table against the generated inventory
+  // (ADR 0048 decision 2, warn-only). Must be registered before any route module.
+  registerRouteAdmissionGuard(app);
+
   // ── Static HTML ──────────────────────────────────────
 
   const webIndexExists = existsSync(WEB_INDEX_PATH);
@@ -180,6 +187,13 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return {
       status: 'ok',
       uptime: process.uptime(),
+      // Content identity of *this* process (read once, never recomputed).
+      // The worktree digest deliberately does not appear here: see
+      // docs/architecture/2026-10-10-control-plane-truth-remediation.md §1.
+      identity: getProcessIdentity({
+        envVersion: config.server.version,
+        packageVersion: gatewayPackage.version,
+      }),
       serviceId: service.serviceId,
       serviceKind: 'gateway',
       ready: current?.readiness.ready ?? false,
@@ -218,6 +232,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerGovernanceRoutes(app);
   registerAuthRoutes(app, { config });
   registerNodeRoutes(app);
+  registerTopologyRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);

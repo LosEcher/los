@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAllowedTools } from './tool-resolver.js';
+import { resolveAllowedTools, resolveToolPolicy } from './tool-resolver.js';
 import { READ_ONLY_BUILTIN_TOOLS } from '../tools/core/registry.js';
 
 const PLANNING_TOOL = 'submit_run_contract';
@@ -39,4 +39,17 @@ test('non-read-only modes keep a non-empty allowlist and dedupe it', () => {
 test('default read-only set matches READ_ONLY_BUILTIN_TOOLS', () => {
   const result = resolveAllowedTools(undefined, 'read-only');
   assert.deepEqual(result, [...READ_ONLY_BUILTIN_TOOLS]);
+});
+
+test('denied permissions survive every policy branch', () => {
+  const denied = ['runtime:spawn'];
+  for (const [toolMode, sandboxMode] of [
+    ['all', 'sandbox'],
+    ['project-write', 'workspace-write'],
+    ['read-only', 'readonly'],
+    ['all', undefined],
+  ] as const) {
+    const policy = resolveToolPolicy(toolMode, undefined, sandboxMode, denied);
+    assert.deepEqual(policy.deniedPermissions, denied, `${toolMode}/${String(sandboxMode)}`);
+  }
 });

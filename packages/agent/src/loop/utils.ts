@@ -48,6 +48,7 @@ export function summarizeCapability(capability: ReturnType<ToolRegistry['getCapa
   if (!capability) return null;
   return {
     name: capability.name,
+    scope: capability.scope,
     riskLevel: capability.riskLevel,
     permissions: capability.permissions,
     timeoutMs: capability.timeoutMs,

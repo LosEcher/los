@@ -8,7 +8,7 @@
  * is constrained: you can write at your scope or below, never above.
  * Promotion between scopes requires evidence gates (see PromotionGate).
  *
- * Aligns with RuleScope ('global' | 'user' | 'project') from @los/agent/rules,
+ * Aligns with RuleScope ('global' | 'user' | 'project') as declared in @los/contracts,
  * adding 'session' as the most granular level.
  */
 

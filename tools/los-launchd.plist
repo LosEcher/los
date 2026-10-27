@@ -20,6 +20,14 @@
     <string>/bin/bash</string>
     <string>__LOS_ROOT__/tools/los-launchd-wrapper.sh</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- 执行器由独立的 launchd 任务托管（钉树 ~/.local/share/los，见
+         tools/deploy-drivers/macos-launchd.sh）。wrapper 据此不再检查 8090、
+         也绝不用 los.sh start（那会连执行器一起拉起并与钉树实例抢端口，2026-10-11）。 -->
+    <key>LOS_EXECUTOR_EXTERNAL</key>
+    <string>1</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

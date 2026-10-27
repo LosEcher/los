@@ -56,7 +56,7 @@ function config(conflicts: Config['providerRouteConflicts']): Config {
         maxPromptTokens: 400,
       },
     },
-    executor: { enabled: false, host: '127.0.0.1', port: 8090, shutdownGraceMs: 120_000, nodeKind: 'executor', connectModes: [], meshNodes: [] },
+    executor: { enabled: false, host: '127.0.0.1', port: 8090, shutdownGraceMs: 120_000, nodeCredentialTtlDays: 30, nodeKind: 'executor', connectModes: [], meshNodes: [], placementPolicy: 'verified-rotate', workspacePolicy: 'verify' },
     profile: 'test',
     defaultProjectId: 'los',
     migrationsDir: 'packages/infra/migrations',

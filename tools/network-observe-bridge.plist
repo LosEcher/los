@@ -25,6 +25,21 @@
     <string>__LOS_ROOT__/tools/sync-network-observe.sh</string>
   </array>
 
+  <!-- 触发（2026-10-13 起双触发，主次分明）：
+       主 = WatchPaths：aidebug 的 network-observe 每产出一轮快照就**原子 rename**
+            一个心跳（network-observe.heartbeat，生产者见 scripts/network-observe.mjs
+            的 writeHeartbeat）。起因是一次**实测竞态**：本桥与观测都是 7200s 独立定时、
+            无排序，实测 bridge-manifest 的 syncedAt=02:01:56 早于源最新快照 02:04:52
+            ⇒ 桥搬的是上一轮数据。
+       次 = StartInterval 7200：**保留的兜底**。事件不保证被处理（watch 会合并、
+            也可能因守护重启漏掉），而且"事件没来"与"作业挂了"必须可区分 ——
+            这一步由 sync-network-observe.sh 内的上游新鲜度门禁（源 >3h 即 fail）承担。
+       两者都保留是**有意**的：见 dsfolder SCHEDULING-GOVERNANCE §2.1 与 §6。 -->
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/echerlos/syncfolder/project/aidebug/.network-observe/network-observe.heartbeat</string>
+  </array>
+
   <key>StartInterval</key>
   <integer>7200</integer>
 

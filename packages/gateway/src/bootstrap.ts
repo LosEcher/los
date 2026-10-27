@@ -47,7 +47,32 @@ import { ensureProviderAccountStore } from '@los/infra/provider-accounts';
 
 const log = getLogger('bootstrap');
 
+/**
+ * Wire `@los/memory`'s session-event sink to the agent's writer.
+ *
+ * The gateway is the only package that may depend on both sides, so the injection
+ * lives here: memory emits `rule_approval` through the sink and never imports the
+ * agent (control-plane truth remediation §9). Called from `ensureAllStores()` so
+ * every entry point — gateway, CLI, migration-drift tool — gets it.
+ */
+async function registerMemorySessionEventSink(): Promise<void> {
+  const [{ appendSessionEvent }, { registerSessionEventSink }] = await Promise.all([
+    import('@los/agent/session-events'),
+    import('@los/memory/session-event-sink'),
+  ]);
+  registerSessionEventSink(event => appendSessionEvent({
+    sessionId: event.sessionId,
+    type: event.type,
+    source: event.source ?? 'los',
+    tenantId: event.tenantId,
+    projectId: event.projectId,
+    userId: event.userId,
+    payload: event.payload,
+  }));
+}
+
 export async function ensureAllStores(): Promise<void> {
+  await registerMemorySessionEventSink();
   // No-inline-FK stores — order-independent.
   await ensureMemoryStore();
   await ensureMemoryCompactionStore();

@@ -2,6 +2,7 @@
  * Workspace files panel — browse and preview files from the agent's workspace.
  * Opens as a collapsible third column or overlay panel.
  */
+import { decimals } from './components/format';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Folder, File, FileCode, FileText, FileImage, X, RefreshCw } from 'lucide-react';
@@ -122,6 +123,6 @@ export function FilesPanel({
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes < 1024 * 1024) return `${decimals(bytes / 1024, 1)}KB`;
+  return `${decimals(bytes / (1024 * 1024), 1)}MB`;
 }

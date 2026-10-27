@@ -196,6 +196,31 @@ export function resolveProjectScope(req: FastifyRequest, requested?: string): st
   return requested ?? ctx.projectId;
 }
 
+/**
+ * Resolve the authoritative tenant filter for **read projections** (list/detail).
+ *
+ * Returns `undefined` when the caller may read across tenants: auth is disabled
+ * (local single-user mode) or the principal is an operator. Returns the
+ * request-context tenant for an authenticated non-operator principal — a
+ * `role=user` JWT or bare access token must not read another tenant's rows.
+ *
+ * Deliberately **tenant-only, never project**. los task/session projections are
+ * cross-project by design, and this is measured, not assumed (2026-10-10 runtime
+ * DB: 877 rows `local/los`, ~250 rows across `dsfolder-*` / `lot2extension`
+ * projects, 82 `unknown/unknown`, 45 empty). A project filter would hide the
+ * multi-project dashboard from its own operator.
+ *
+ * Legacy rows with an empty or `unknown` tenant stay visible to operator and
+ * local modes and are excluded for non-operator principals (fail-closed). Rows
+ * are not rewritten here; backfilling legacy tenant values is separate work.
+ */
+export function resolveReadScope(req: FastifyRequest): string | undefined {
+  const ctx = getRequestContext(req);
+  if (!getConfig().auth.enabled) return undefined;
+  if (ctx.isOperator) return undefined;
+  return ctx.tenantId;
+}
+
 export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
   const ctx = getRequestContext(req);
   const common = {

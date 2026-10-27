@@ -10,7 +10,7 @@
 
 import { getLogger } from '@los/infra/logger';
 import type { MCPTransport } from './mcp-transport.js';
-import type { JSONRPCMessage } from './mcp-stdio-transport.js';
+import type { JSONRPCMessage } from './mcp-transport.js';
 
 const log = getLogger('agent');
 const RECONNECT_DELAY_MS = 1_000;

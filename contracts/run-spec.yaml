@@ -128,6 +128,12 @@ properties:
     description: Attempt number for a fresh task_run created from retry or recovery.
   executor:
     type: object
+    description: >
+      Executor dispatch options. Consumed by the scheduled-work and
+      execution-experiment routes only; the /chat route does not read this field at
+      all, so an MCP-dispatched chat run executes in the gateway process and is
+      labelled with config.executor.nodeId. See
+      docs/architecture/2026-10-11-execution-node-selection-and-remote-runs.md.
     properties:
       enabled:
         type: boolean
@@ -194,6 +200,25 @@ properties:
       phaseChangedAt:
         type: string
         format: date-time
+      phaseTracking:
+        type: string
+        enum: [tracked, exempt]
+        description: >
+          Whether this contract's `phase` field is meant to be read as lifecycle
+          truth. `tracked` means the phase column is real; `exempt` means the
+          writing path deliberately does not participate in the phase lifecycle
+          and must say why via `phaseExemptReason`. This is a sidecar marker, NOT
+          a phase value: `not_applicable` is deliberately absent from the `phase`
+          enum, because unknown strings are normalized away and any non-RunPhase
+          value would make terminal rows look permanently drifted.
+      phaseExemptReason:
+        type: string
+        enum: [openai_compat, feed_analysis_ingress, chat_without_phase, subagent_inherited, work_item_draft, scenario_runner, writer_omitted]
+        description: >
+          Why `phaseTracking` is `exempt`. `writer_omitted` is the safety net for
+          writing paths that neither set a phase nor declare a reason; it is a
+          write-side defect signal counted separately in the governance report,
+          not a legitimate exemption.
       plan:
         type: array
         minItems: 1

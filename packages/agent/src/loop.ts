@@ -53,6 +53,7 @@ import type {
 import type { Message, ToolCall } from './providers/index.js';
 import {
   consumeOperatorControlEvents,
+  isMidTurnDrain,
   type OperatorControlCursors,
 } from './operator-control-consumer.js';
 import {
@@ -216,15 +217,21 @@ export async function runAgent(
     repairCtx.providerName = provider.name;
     repairCtx.profile = provider.profile;
     assertNotAborted(signal);
-    const steering = await consumeOperatorControlEvents({
-      sessionId: config.sessionId,
-      runSpecId: config.runSpecId,
-      taskRunId: config.taskRunId,
-      turn: i + 1,
-      boundary: 'before_turn',
-      cursors: operatorControlCursors,
-      includeFollowups: false,
-    });
+    let steering: Awaited<ReturnType<typeof consumeOperatorControlEvents>>;
+    try {
+      steering = await consumeOperatorControlEvents({
+        sessionId: config.sessionId,
+        runSpecId: config.runSpecId,
+        taskRunId: config.taskRunId,
+        turn: i + 1,
+        boundary: 'before_turn',
+        cursors: operatorControlCursors,
+        includeFollowups: false,
+      });
+    } catch (err: any) {
+      agentLog.warn(`operator control unavailable: ${err?.message ?? String(err)}`);
+      steering = { consumed: [], cursors: operatorControlCursors };
+    }
     operatorControlCursors = steering.cursors;
     messages.push(...steering.consumed.map(item => item.message));
     agentLog.debug(`Turn ${i + 1}/${maxLoops}`);
@@ -391,15 +398,21 @@ export async function runAgent(
       }
 
       if (i + 1 < maxLoops) {
-        const queuedControl = await consumeOperatorControlEvents({
-          sessionId: config.sessionId,
-          runSpecId: config.runSpecId,
-          taskRunId: config.taskRunId,
-          turn: i + 1,
-          boundary: 'after_completion',
-          cursors: operatorControlCursors,
-          includeFollowups: true,
-        });
+        let queuedControl: Awaited<ReturnType<typeof consumeOperatorControlEvents>>;
+        try {
+          queuedControl = await consumeOperatorControlEvents({
+            sessionId: config.sessionId,
+            runSpecId: config.runSpecId,
+            taskRunId: config.taskRunId,
+            turn: i + 1,
+            boundary: 'after_completion',
+            cursors: operatorControlCursors,
+            includeFollowups: true,
+          });
+        } catch (err: any) {
+          agentLog.warn(`operator control unavailable: ${err?.message ?? String(err)}`);
+          queuedControl = { consumed: [], cursors: operatorControlCursors };
+        }
         operatorControlCursors = queuedControl.cursors;
         if (queuedControl.consumed.length > 0) {
           messages.push(...queuedControl.consumed.map(item => item.message));
@@ -450,6 +463,33 @@ export async function runAgent(
       };
     }
 
+    // Operator drain. `finish_current_tool` / `immediate` steering recorded
+    // while tools are running is applied after the current tool batch, so the
+    // model's next call sees it in the same turn; `finish_current_turn`
+    // (the recorded default) stays at the turn boundary.
+    const midTurnDrainCheck = async (): Promise<boolean> => {
+      let midTurn: Awaited<ReturnType<typeof consumeOperatorControlEvents>>;
+      try {
+        midTurn = await consumeOperatorControlEvents({
+          sessionId: config.sessionId,
+          runSpecId: config.runSpecId,
+          taskRunId: config.taskRunId,
+          turn: i + 1,
+          boundary: 'mid_turn',
+          cursors: operatorControlCursors,
+          includeFollowups: false,
+          acceptSteering: isMidTurnDrain,
+        });
+      } catch (err: any) {
+        agentLog.warn(`operator control unavailable: ${err?.message ?? String(err)}`);
+        return false;
+      }
+      operatorControlCursors = midTurn.cursors;
+      if (midTurn.consumed.length === 0) return false;
+      messages.push(...midTurn.consumed.map(item => item.message));
+      return true;
+    };
+
     // Execute tool calls
     const { toolResults, toolMessages, persistedToolResults: turnPersistedResults } = await runToolCalls({
       toolCalls: repaired.calls,
@@ -461,6 +501,7 @@ export async function runAgent(
       emitEvent,
       onSessionError,
       preActionGateConfig,
+      drainCheck: midTurnDrainCheck,
     });
     for (const [callId, evidence] of turnPersistedResults) {
       persistedToolResults.set(callId, evidence);

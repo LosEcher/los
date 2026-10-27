@@ -357,6 +357,8 @@ authentication, not current API reachability or successful mirroring.
 | `branch-closeout.sh` warns about token | Its remote CI query cannot authenticate | Verify via authenticated API; do not infer server limitation |
 | Git push succeeds but API is anonymous | Git credential path works; the current API call did not use it | Load Keychain Basic Auth or a token explicitly |
 | GitHub API fails while Git refs resolve | API health and Git transport differ | Report the API gap; do not infer PR state from refs alone |
+| All four jobs fail in under a minute, before any gate runs | The failure is at the runner or the egress preflight, not in the code | `podman ps`/`podman ps -a` on `win-los` for the runner container; read the preflight line's `proxy=` and the curl exit code |
+| Preflight step prints `proxy=...` then `registry preflight failed (curl exit 28)` | A timeout through a proxy is not proof the registry is down — the proxy path itself may be unreachable from the job container | Probe from a job-like container: direct vs `-x <proxy>`; with Podman in a VM the host candidate is `host.containers.internal`, not the LAN IP (2026-10-28 record) |
 
 ## References
 

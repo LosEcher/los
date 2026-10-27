@@ -219,7 +219,7 @@ async function finalizeRequeuedRunSpec(
 }
 
 function isDLQReason(value: string): value is DLQReason {
-  return value === 'lease_expired' || value === 'max_attempts' || value === 'unrecoverable_error';
+  return value === 'lease_expired' || value === 'max_attempts' || value === 'unrecoverable_error' || value === 'outbox_exhausted';
 }
 
 function emptyReasonSummary(): Record<DLQReason, DeadLetterReasonSummary> {
@@ -227,6 +227,7 @@ function emptyReasonSummary(): Record<DLQReason, DeadLetterReasonSummary> {
     lease_expired: { total: 0, unacknowledged: 0, acknowledged: 0, requeued: 0 },
     max_attempts: { total: 0, unacknowledged: 0, acknowledged: 0, requeued: 0 },
     unrecoverable_error: { total: 0, unacknowledged: 0, acknowledged: 0, requeued: 0 },
+    outbox_exhausted: { total: 0, unacknowledged: 0, acknowledged: 0, requeued: 0 },
   };
 }
 

@@ -38,6 +38,9 @@ export interface SpawnAgentRunnerOptions {
   workspaceRoot?: string;
   /** Parent tool mode. Children cannot exceed this (read-only parent ⇒ read-only child). */
   parentToolMode?: 'read-only' | 'project-write' | 'all';
+  /** Inherit the parent's execution channel so a stateless parent cannot spawn
+   *  a child that falls back to warn-by-default approval. */
+  executionMode?: AgentConfig['executionMode'];
   traceId?: string;
   requestId?: string;
   runSpecId?: string;
@@ -279,6 +282,7 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
       },
     },
   }, {
+    scope: [],
     // L1: read-only parents (maxRiskLevel L0) cannot spawn. Children never
     // receive spawn_agent, so they cannot widen tools.
     riskLevel: 'L1',
@@ -356,6 +360,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:query'],
     timeoutMs: 5_000,
@@ -390,6 +395,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:kill'],
     timeoutMs: 5_000,
@@ -424,6 +430,7 @@ export function registerAgentQueryKillTools(registry: ToolRegistry, options: { t
       parameters: { type: 'object', properties: {} },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['agent:list'],
     timeoutMs: 5_000,
@@ -486,6 +493,9 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         allowedTools: [...childAllowedTools(childToolMode)],
         maxLoops: childMaxLoops,
         runContract: childRunContractMetadata,
+        // Inherited contracts keep their phase when they have one; otherwise the
+        // exemption names the inheritance instead of blaming the writer.
+        phaseExemptReason: 'subagent_inherited',
       });
       childRunSpecId = specId;
     } catch (error) {
@@ -583,6 +593,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         maxLoops: childMaxLoops,
         workspaceRoot: options.workspaceRoot,
         toolMode: childToolMode,
+        executionMode: options.executionMode,
         allowedTools: childAllowedTools(childToolMode),
         toolRetry: options.toolRetry,
         signal: abortController.signal,
@@ -657,6 +668,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
+      executionMode: options.executionMode,
       allowedTools: childAllowedTools(childToolMode),
       toolRetry: options.toolRetry,
       signal: options.signal,

@@ -1,6 +1,10 @@
+import { getConfig } from '@los/infra/config';
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import { resolveExecutorEndpoint } from '../executor-node-utils.js';
 import { isNodeInMaintenance, loadNodeMaintenancePoliciesBatch } from '../node-maintenance-policy.js';
+import { choosePlacement } from './placement.js';
+import { _resolveDispatchTaskToken } from './task-token-dispatch.js';
+import { _requiredNodeBlockReason } from './required-node.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -25,6 +29,12 @@ export type ExecutorSelectionDecision = {
   candidateIds: string[];
   selectedId?: string;
   skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
+  /**
+   * S7：选中的**依据**（探测结果 + capacity 快照 + 轮转计数 + basis）。
+   * 由调用方写进 `scheduler_decisions.metadata` —— NEXT-STEPS §4.2 要求"关键任务的路由
+   * 依据要能被事后复核"，改前决策记录里没有任何 capacity 数据，复核做不到。
+   */
+  selection?: Record<string, unknown>;
 };
 
 export class _ExecutorSelectionError extends Error {
@@ -52,14 +62,25 @@ export async function resolveExecutor(
     // depth → active tasks → capacity → heartbeat). Falls back to the first
     // configured URL when no DB record matches (deterministic, not random).
     const nodes = await listExecutorNodes(100);
-    const ordered = sortExecutorCandidates(nodes, normalizeOptionalString(config.nodeId));
+    const requiredNodeId = normalizeOptionalString(config.requiredNodeId);
+    const requiredTarget = requiredNodeId ? nodes.find(node => node.nodeId === requiredNodeId) : undefined;
+    const requiredUrl = requiredTarget
+      ? normalizeExecutorUrl(resolveExecutorEndpoint(requiredTarget.connectConfig, 'agent_http') ?? '')
+      : undefined;
+    if (requiredNodeId
+      && (!requiredTarget || requiredTarget.status !== 'online' || !requiredUrl || !normalizedUrls.includes(requiredUrl))) {
+      throw new Error(
+        `required executor node ${requiredNodeId} is not an online node whose agent_http URL is in executor.nodeUrls`,
+      );
+    }
+    const ordered = sortExecutorCandidates(nodes, requiredNodeId ?? normalizeOptionalString(config.nodeId));
     const healthy = ordered.find(node =>
       normalizedUrls.includes(normalizeExecutorUrl(resolveExecutorEndpoint(node.connectConfig, 'agent_http') ?? ''))
       && node.status === 'online');
-    const selectedUrl = healthy
+    const selectedUrl = requiredUrl ?? (healthy
       ? normalizeExecutorUrl(resolveExecutorEndpoint(healthy.connectConfig, 'agent_http')!)!
-      : normalizedUrls[0]!;
-    const nodeId = normalizeOptionalString(config.nodeId) ?? (healthy ? healthy.nodeId : selectedUrl);
+      : normalizedUrls[0]!);
+    const nodeId = requiredNodeId ?? normalizeOptionalString(config.nodeId) ?? (healthy ? healthy.nodeId : selectedUrl);
     const skipped = normalizedUrls
       .filter(url => url !== selectedUrl)
       .map(url => ({ id: url, reason: 'load_distribution' as const }));
@@ -79,6 +100,7 @@ export async function resolveExecutor(
   }
 
   const nodes = await listExecutorNodes(100);
+  const requiredNodeId = normalizeOptionalString(config.requiredNodeId);
 
   // Maintenance windows are evaluated HERE, at selection time, not in
   // `evaluateExecutorNode`: that function's result is computed at upsert and
@@ -96,8 +118,19 @@ export async function resolveExecutor(
       .map(node => node.nodeId),
   );
 
-  const candidates = nodes.filter(node => node.execution.candidate && !maintenanceBlocked.has(node.nodeId));
-  const preferredNodeId = normalizeOptionalString(config.nodeId);
+  const candidates = nodes.filter(node =>
+    node.execution.candidate
+    && !maintenanceBlocked.has(node.nodeId)
+    && (!requiredNodeId || node.nodeId === requiredNodeId),
+  );
+  if (requiredNodeId && candidates.length === 0) {
+    const reason = _requiredNodeBlockReason(requiredNodeId, nodes, maintenanceBlocked);
+    throw new _ExecutorSelectionError(
+      `required executor node ${requiredNodeId} is not eligible: ${reason}`,
+      { source: 'executor_registry', requiredCapabilities, candidateIds: [], skipped: [{ id: requiredNodeId, reason }] },
+    );
+  }
+  const preferredNodeId = requiredNodeId ?? normalizeOptionalString(config.nodeId);
   const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
   const skipped: ExecutorSelectionDecision['skipped'] = nodes
@@ -121,6 +154,10 @@ export async function resolveExecutor(
       });
     }
   }
+  // 通过硬门槛（URL 可用 / 资源 / 能力）的候选**先收集再决定**（S7，2026-10-11）。
+  // 改前这里是"第一个通过的立刻 return"——于是排序函数的末段键（capacity 字段个数）
+  // 实际就是路由策略，且没有任何一步问过"这个节点上有没有这个工作区"。
+  const eligible: Array<{ node: ExecutorNodeRecord; url: string }> = [];
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
     if (!url) {
@@ -146,17 +183,39 @@ export async function resolveExecutor(
       });
       continue;
     }
+    eligible.push({ node, url });
+  }
+
+  if (eligible.length > 0) {
+    const agentKey = normalizeOptionalString(config.agentKey)
+      ?? normalizeOptionalString(getConfig().executor.agentKey);
+    const choice = await choosePlacement({
+      ordered: eligible.map(item => item.node),
+      workspaceRoot: intent.workspaceRoot,
+      workspacePolicy: intent.workspacePolicy,
+      placementPolicy: intent.placementPolicy,
+      agentKey,
+    });
+    const picked = choice
+      ? eligible.find(item => item.node.nodeId === choice.node.nodeId) ?? eligible[0]!
+      : eligible[0]!;
     return {
-      url,
-      nodeId: node.nodeId,
+      url: picked.url,
+      nodeId: picked.node.nodeId,
       agentKey: normalizeOptionalString(config.agentKey),
       decision: {
         source: 'executor_registry',
         placementTier: 'warm',
         requiredCapabilities,
         candidateIds: ordered.map(item => item.nodeId),
-        selectedId: node.nodeId,
+        selectedId: picked.node.nodeId,
         skipped,
+        selection: choice?.evidence ?? {
+          policy: 'health',
+          basis: 'health_order',
+          ranked: eligible.map(item => item.node.nodeId),
+          chosen: picked.node.nodeId,
+        },
       },
     };
   }
@@ -226,6 +285,12 @@ export async function runAgentOnExecutor(
     leaseMs: number;
     executionKernelKind: string;
     prompt: string;
+    /**
+     * Optional override. Normally the dispatcher mints a short-lived token from
+     * `LOS_TASK_TOKEN_SECRET`; tests can pass an explicit token to assert the
+     * envelope without configuring a secret.
+     */
+    taskToken?: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
@@ -235,6 +300,8 @@ export async function runAgentOnExecutor(
     onKernelEvent?: (event: KernelEvent) => void | Promise<void>;
   },
 ): Promise<AgentResult> {
+  const taskToken = _resolveDispatchTaskToken(input);
+
   // SSH-backed executors use a different transport (ssh CLI + ndjson stream).
   if (executor.url.startsWith('ssh://')) {
     const sshExecutor = resolveSSHExecutor({
@@ -244,7 +311,10 @@ export async function runAgentOnExecutor(
       connectConfig: sshExecutorUrlToConnectConfig(executor.url),
     } as ExecutorNodeRecord);
     if (!sshExecutor) throw new Error(`SSH executor URL ${executor.url} missing valid SSH config`);
-    return await runAgentOnSSHExecutor(sshExecutor, input);
+    return await runAgentOnSSHExecutor(sshExecutor, {
+      ...input,
+      ...(taskToken ? { taskToken } : {}),
+    });
   }
 
   const res = await fetch(`${executor.url}/v1/tasks/run-agent`, {
@@ -262,6 +332,7 @@ export async function runAgentOnExecutor(
       leaseMs: input.leaseMs,
       executionKernelKind: input.executionKernelKind,
       prompt: input.prompt,
+      ...(taskToken ? { taskToken } : {}),
       config: input.config,
     }),
     signal: input.signal,

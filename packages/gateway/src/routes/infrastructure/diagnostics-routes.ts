@@ -19,6 +19,7 @@ import {
   payloadRedactorCount,
 } from '@los/agent/event-redaction';
 import { getSymbolCacheMetrics } from '../../chat-cbm-symbol-cache.js';
+import { requireOperator } from '../../request-context.js';
 
 export type DiagnosticsRouteDependencies = {
   ensureProviderCallTelemetryStore: typeof ensureProviderCallTelemetryStore;
@@ -116,16 +117,24 @@ export function registerDiagnosticsRoutes(
   app: FastifyInstance,
   deps: DiagnosticsRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/diagnostics/outbox', async () => ({
+  app.get('/diagnostics/outbox', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    return ({
     outbox: await deps.readExecutionOutboxHealth(),
-  }));
+    });
+  });
 
-  app.get('/diagnostics/cbm-cache', async () => ({
+  app.get('/diagnostics/cbm-cache', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    return ({
     cache: getSymbolCacheMetrics(),
-  }));
+    });
+  });
 
   // ── Redaction waterfall policy ───────────────────────────
-  app.get('/diagnostics/redaction', async () => ({
+  app.get('/diagnostics/redaction', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    return ({
     pipeline: 'default + registered extensions',
     failClosed: true,
     limits: {
@@ -134,10 +143,12 @@ export function registerDiagnosticsRoutes(
       maxJsonBytes: MAX_PAYLOAD_JSON_BYTES,
     },
     activeRedactors: payloadRedactorCount(),
-  }));
+    });
+  });
 
   // ── Trace detail ────────────────────────────────────────
   app.get('/diagnostics/:traceId', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const traceId = (req.params as Record<string, string>).traceId;
     if (!traceId || !isValidTraceId(traceId)) {
       return reply.status(400).send({ error: 'Invalid traceId' });
@@ -286,7 +297,8 @@ export function registerDiagnosticsRoutes(
   });
 
   // ── Recent traces ───────────────────────────────────────
-  app.get('/diagnostics', async (_req, reply) => {
+  app.get('/diagnostics', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     await deps.ensureSessionEventStore();
     const db = getDb();
 
@@ -313,7 +325,8 @@ export function registerDiagnosticsRoutes(
   });
 
   // ── Provider health ─────────────────────────────────────
-  app.get('/diagnostics/provider-health', async (_req, reply) => {
+  app.get('/diagnostics/provider-health', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     await deps.ensureProviderCallTelemetryStore();
     const db = getDb();
 

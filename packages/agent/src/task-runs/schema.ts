@@ -54,6 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_lease_fence
   WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
+-- 落点聚合（summarizeTaskRunPlacement）按 created_at 时间窗过滤：上面所有索引都不以
+-- created_at 打头，缺它则窗口聚合成全表扫。task_runs 是热表，故只在窗口读路径需要时才建这一个。
+CREATE INDEX IF NOT EXISTS idx_task_runs_created ON task_runs(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe
   ON task_runs(dedupe_key)
   WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');

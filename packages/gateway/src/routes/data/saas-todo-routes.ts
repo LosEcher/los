@@ -24,6 +24,7 @@ import {
 } from '@los/agent';
 import type { TodoStatus, CreateTodoInput } from '@los/agent/todos';
 import { LOS_PLANNING_TODO_SEED } from '@los/agent/todo-seeds';
+import { requireOperator } from '../../request-context.js';
 
 type SaaSTodoRouteDependencies = {
   createTodo: typeof createTodo;
@@ -95,6 +96,7 @@ export function registerSaaSTodoRoutes(
    *   { dispatched, skipped, todoIds, jobId }
    */
   app.post('/tenants/:tenantId/projects/:projectId/todos/dispatch', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const tenantId = normalizeId((req.params as any).tenantId);
     const projectId = normalizeId((req.params as any).projectId);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -234,6 +236,7 @@ export function registerSaaSTodoRoutes(
    *   dryRun: boolean (default: false)
    */
   app.post('/tenants/:tenantId/projects/:projectId/todos/reconcile', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const tenantId = normalizeId((req.params as any).tenantId);
     const projectId = normalizeId((req.params as any).projectId);
     const body = (req.body ?? {}) as Record<string, unknown>;

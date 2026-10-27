@@ -15,6 +15,7 @@ import {
   publishDailyDigest,
   type DailyDigestQuery,
 } from '@los/agent/daily-digest';
+import { requireOperator } from '../../request-context.js';
 import { getRuntimeHealth } from '@los/agent/runtime-health';
 import { getMetricsActivity, type ActivityQuery } from '@los/agent/metrics-activity';
 import { getMetricsTrends, type TrendsQuery } from '@los/agent/metrics-trends';
@@ -45,6 +46,7 @@ export function registerUsageRoutes(
   const dependencies = { ...defaultDependencies, ...overrides };
 
   app.get('/usage/summary', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as Record<string, unknown>;
     const input: UsageSummaryQuery = {
       from: optionalString(query.from),
@@ -61,6 +63,7 @@ export function registerUsageRoutes(
   });
 
   app.get('/metrics/trends', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as Record<string, unknown>;
     const input: TrendsQuery = {
       from: optionalString(query.from),
@@ -77,6 +80,7 @@ export function registerUsageRoutes(
   });
 
   app.get('/metrics/activity', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as Record<string, unknown>;
     const input: ActivityQuery = {
       from: optionalString(query.from),
@@ -93,6 +97,7 @@ export function registerUsageRoutes(
   });
 
   app.get('/ops/daily-digest', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as Record<string, unknown>;
     const input: DailyDigestQuery = {
       day: optionalString(query.day),
@@ -109,6 +114,7 @@ export function registerUsageRoutes(
 
   /** Compose digest and emit session event for WeChat/Telegram SSE consumers. */
   app.post('/ops/daily-digest/push', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const query = req.query as Record<string, unknown>;
     const input: DailyDigestQuery = {
@@ -133,7 +139,8 @@ export function registerUsageRoutes(
   });
 
   // Aggregated board only — never claims work (2026-08-09 control-plane decision).
-  app.get('/ops/runtime-health', async (_req, reply) => {
+  app.get('/ops/runtime-health', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     try {
       return await dependencies.getRuntimeHealth();
     } catch (err) {

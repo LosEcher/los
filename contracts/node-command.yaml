@@ -23,11 +23,21 @@ properties:
     type: string
   command:
     type: string
+    # 2026-10-12 对齐实测 + 实现：契约此前只列前四个值，漏掉 restart/upgrade/rollback/run-check。
+    # 其中 **`run-check` 是实测使用最多的命令（409/640 行）** —— 它是远端 run 的 requiredCheck
+    # 在属主节点上执行的通道，契约漏它等于把最常用的命令写成"未定义"。
+    # 实测分布（node_commands 640 行）：run-check 409 / promote 132 / drain 91 / status 5 /
+    # probe 2 / upgrade 1；**restart 与 rollback 实测 0 行**（类型里有、尚无产出）。
+    # 单一真源 = `NODE_COMMAND_NAMES`（packages/agent/src/node-commands.ts，该处已收敛三处重复列表）。
     enum:
       - status
       - probe
       - drain
       - promote
+      - restart
+      - upgrade
+      - rollback
+      - run-check
       - restart
       - upgrade
       - rollback
@@ -49,12 +59,16 @@ result:
   properties:
     status:
       type: string
+      # 2026-10-12 对齐实现：类型 `NodeCommandStatus` 还有第六个值 `rejected`（规范化器也接受它），
+      # 但**实测 0/640 行**出现该状态，且全仓找不到给它置位的生产点
+      # ⇒ 记为"声明了但从未产生"；不替它编语义（实测分布只有 succeeded 590 / failed 46 / denied 4）。
       enum:
         - accepted
         - running
         - succeeded
         - failed
         - denied
+        - rejected
     startedAt:
       type: string
       format: date-time

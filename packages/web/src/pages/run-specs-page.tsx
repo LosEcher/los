@@ -1,3 +1,4 @@
+import { formatTimestamp } from '../ui';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Play, ShieldCheck } from 'lucide-react';
@@ -56,9 +57,21 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
     if (selectedRunSpecId) setSelectedId(selectedRunSpecId);
   }, [selectedRunSpecId]);
 
+  // 项目维度：服务端过滤（GET /runs?projectId=…），选项来自已登记项目
+  const [projectFilter, setProjectFilter] = useState('');
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => getJson<{ projects: Array<{ projectId?: string; id?: string }> }>('/projects'),
+    staleTime: 300_000,
+  });
+
   const runs = useQuery({
-    queryKey: ['runs'],
-    queryFn: () => getJson<RunSpec[]>('/runs?limit=100'),
+    queryKey: ['runs', projectFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '100' });
+      if (projectFilter) params.set('projectId', projectFilter);
+      return getJson<RunSpec[]>(`/runs?${params.toString()}`);
+    },
     refetchInterval: 30_000,
   });
 
@@ -123,7 +136,21 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
             <h2>{t('ops.runSpecs.title')}</h2>
             <p>{t('ops.runSpecs.subtitle')}</p>
           </div>
-          <StatusPill status={runList.length > 0 ? 'live' : 'partial'} />
+          <div className="toolbar">
+            <select
+              className="filter-select"
+              aria-label={t('ops.runSpecs.filterProject')}
+              value={projectFilter}
+              onChange={event => setProjectFilter(event.target.value)}
+            >
+              <option value="">{t('ops.runSpecs.filterAllProjects')}</option>
+              {(projects.data?.projects ?? []).map(project => {
+                const id = project.projectId ?? project.id ?? '';
+                return id ? <option key={id} value={id}>{id}</option> : null;
+              })}
+            </select>
+            <StatusPill status={runList.length > 0 ? 'live' : 'partial'} />
+          </div>
         </div>
         <DataTable
           loading={runs.isLoading}
@@ -144,7 +171,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                 <div className="record-meta">
                   {r.provider ? <span>{r.provider}/{r.model}</span> : null}
                   {r.sessionId ? <span>{t('ops.runSpecs.sessionShort', { sessionId: r.sessionId.slice(0, 12) })}</span> : null}
-                  <span>{new Date(r.createdAt).toLocaleString()}</span>
+                  <span>{formatTimestamp(r.createdAt)}</span>
                 </div>
                 {r.prompt ? (
                   <div className="record-detail">

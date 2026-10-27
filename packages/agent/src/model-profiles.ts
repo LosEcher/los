@@ -446,11 +446,25 @@ export function resolveModelProfile(
     }
     base = openAICompatibleProfile(provider, baseUrl, model);
   }
+  // **`apiShape` 与 `protocol` 必须一致**：两者都在描述"走哪条线"。
+  // 原实现只在 options 里覆盖 `apiShape`（下面那行），**`protocol` 仍取 base profile 的值**
+  // ⇒ 一个自定义名字的 provider（如 `zenmux-claude`）即使配了
+  // `apiShape: 'anthropic-messages'`，`protocol` 依然是 `'openai'`；
+  // 而 `registry.ts` 是按 **`profile.protocol === 'anthropic'`** 分派传输的、
+  // 不是按 apiShape ⇒ 请求被打到 `{baseUrl}/chat/completions`。
+  // 2026-10-12 实测：`zenmux-claude` 指向 zenmux 的 Anthropic 端点
+  // （`https://zenmux.ai/api/anthropic`）时，遥测记
+  // `endpoint=/chat/completions status=500`，上游回的是 HTML 错误页；
+  // 而 `deepseek-anthropic`（名字命中 `MODEL_PROFILES`、protocol 本来就是 anthropic）
+  // 记的是 `/v1/messages status=200`。
+  const apiShape = options.apiShape ?? base.apiShape;
+  const protocol: ProviderProtocol = apiShape === 'anthropic-messages' ? 'anthropic' : 'openai';
   const resolved = {
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
     model: options.model ?? base.model,
-    apiShape: options.apiShape ?? base.apiShape,
+    apiShape,
+    protocol,
   };
   // 命中模型专属价优先；未命中回退到该 provider 的基本价，**不得返回 undefined**。
   // 原实现是 `base.pricingByModel ? base.pricingByModel[model] : base.pricing`：只要

@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { setFormatLang } from '../components/format.mjs';
 import { en } from './en/index';
 import { zh } from './zh/index';
 
@@ -21,6 +22,16 @@ const DICTS: Record<Lang, Record<string, string>> = { en, zh };
 // Module-level active language so non-hook helpers (formatDate, formatDuration)
 // can localize without prop drilling. Kept in sync by I18nProvider.
 let activeLang: Lang = 'en';
+
+/**
+ * 同步"模块级语言"与 `format` 模块。
+ * `format.mjs` 持有所有展示词（刚刚/从未/在线…），语言切了它必须跟着切，
+ * 否则会出现"界面中文、时间显示英文"的裂口。
+ */
+function setActiveLang(next: Lang): void {
+  activeLang = next;
+  setFormatLang(next);
+}
 
 export function getActiveLang(): Lang {
   return activeLang;
@@ -72,12 +83,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     const initial = readStoredLang();
     // Keep the module-level active language in sync synchronously so tt()
     // and getActiveLang() see the new language in the same render pass.
-    activeLang = initial;
+    setActiveLang(initial);
     return initial;
   });
 
   const setLang = useCallback((next: Lang) => {
-    activeLang = next;
+    setActiveLang(next);
     setLangRaw(next);
     try { localStorage.setItem(STORAGE_KEY, next); } catch { /* ignore */ }
   }, []);

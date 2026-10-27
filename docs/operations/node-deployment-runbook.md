@@ -24,19 +24,182 @@ Maintain these facts for every active node without storing credentials:
 | Runtime endpoint | `EXECUTOR_HOST`, `EXECUTOR_PORT`, `/health` response |
 | Build identity | `/health.version` and registry `version` |
 | Service owner | systemd/launchd label, service user, main PID |
-| Database | instance owner and port; never infer it from a generic 5432 listener |
+| Execution mode | `EXECUTOR_DB_MODE`; `/health` `db` / `taskTokenMode` / `leaseTransport` |
+| Database | instance owner and port; never infer it from a generic 5432 listener; `none` nodes must have no `DATABASE_URL` |
 | Resource class | RAM, swap, free disk, `heavy_task_safe`, `deploy_safe` |
 | Configuration owner | path and permissions of `.env`; never record secret values |
 
 Verify `build identity` from **two independent sources**: the `.env`-stamped
 version that `/health` reports, and the node's own content digest
-(`cd <root> && bash tools/los.sh build-version`) where the platform can compute
-it. The stamp alone does not prove which code is on disk — on 2026-10-06
-`desktop-srsbe20` reported the target version while still running the previous
-tree, because the upload had failed and only the `.env` was rewritten.
+(`cd <root> && bash tools/los.sh build-version`, or
+`node tools/deployable-content.mjs --digest` where there is no bash). The stamp
+alone does not prove which code is on disk — on 2026-10-06 `desktop-srsbe20`
+reported the target version while still running the previous tree, because the
+upload had failed and only the `.env` was rewritten.
+
+## Content Identity
+
+The deployed version is a deterministic digest of the content a node executes:
+`<base>+b<12hex>`, where `<base>` is `packages/executor/package.json`'s version
+and the 12 hex characters are a SHA-256 over every covered file's SHA-256.
+
+**It has exactly one implementation: `tools/deployable-content.mjs`.** bash
+(`tools/los.sh build-version`) and PowerShell (the Windows driver's `digest`
+step) are both callers, because a digest that only one platform can compute is
+not a criterion — it is a slogan. What is covered, and what is deliberately
+excluded (gateway-only scripts, `node_modules`, `dist`, `.turbo`, `.los`,
+`.los-runtime`, `*.tsbuildinfo`, `.DS_Store`, `._*`), is defined there and pinned
+by `tools/deployable-content.test.mjs` (`pnpm check:deployable-content`).
+
+```bash
+bash tools/los.sh build-version             # the version string
+bash tools/los.sh build-version --files     # the exact files the digest covers
+node tools/deployable-content.mjs --json    # version + base + revision + files
+```
+
+Use `--files` to diagnose a mismatch instead of guessing: run it on the gateway
+and on the node, diff the two lists, and you will see whether the node is
+**missing** files (a genuinely half-synced tree) or holding **extra** ones (a
+stale file the prune did not remove). A whole-tree digest alone can only say
+"different" — that ambiguity is what cost hours on 2026-10-11.
+
+The digest moved to this module on 2026-10-11 (it used to be an inline bash
+pipeline). Equivalence was proven before the switch — identical file lists and
+identical digests on the same explicit list — and the fleet was then rolled once,
+because the module itself is covered content. See
+`architecture/2026-10-11-cross-platform-content-identity-design.md`.
+
+**Covered means repository content, not "whatever is on disk".** The module also
+excludes the generated state that the repository's own `.gitignore` calls non-content
+(`*.db`/`*.db-shm`/`*.db-wal`, `packages/<pkg>/test-results/`). Without that, running
+a test suite or writing a local SQLite WAL silently **moved the fleet target**, and
+428 KB of that state was shipped to every node. Generated state belongs in
+`.los-runtime/` (excluded); if something new starts writing inside a covered tree,
+move the producer rather than extending the list — the list exists as a backstop, and
+a covered-but-not-shipped file makes convergence impossible (loudly, not silently).
+
+**A rollout freezes its payload once, from a revision.** `tools/los-fleet-rollout.sh`
+builds the ship tarball at the start by archiving **`main@origin`** (`git archive`, so
+only tracked content can enter), extracts it to
+`.los-runtime/rollouts/payload-latest-tree`, and defines the target as *that
+snapshot's* digest; every node then receives the same bytes (`LOS_DEPLOY_TARBALL`).
+
+Two properties come from this, and they are the point:
+
+- **the working tree is not the content.** A dirty, branchy or stale checkout no
+  longer decides what the fleet runs — the named revision does. "The fleet runs what
+  is merged" stops being a property you approximate by checking whether a tree is
+  dirty, and becomes the default behaviour. (The tree still decides *which rollout
+  code* runs, so run rolls from a tree that is near `main`.)
+- **mid-rollout edits cannot split the fleet.** Each node used to pack its own tarball
+  at its own turn, with the target computed before any of them; now the bytes are
+  fixed before the first node, so a writer active during a rollout cannot leave the
+  early nodes on one revision and the later ones on another.
+
+`LOS_ROLLOUT_SOURCE=worktree` opts into the old behaviour (ship what is on disk) for a
+deliberate hotfix roll; that mode keeps the dirty-tree gate and the "not
+`main@origin`" warning. `LOS_ROLLOUT_REVISION=<rev>` picks a different revision.
+
+
+**The target is a snapshot of the gateway's working tree**, not of a commit:
+`tools/los-fleet-rollout.sh` computes it with `bash tools/los.sh build-version` in
+the checkout it runs from. Two invariants therefore have to hold, and the
+orchestrator enforces both:
+
+1. **The covered files must be committed.** An uncommitted edit inside the digest's
+   scope makes the target a snapshot of work in progress, so a rollout would ship
+   that work to the whole fleet. The orchestrator lists the offending files and
+   **refuses to roll**; `LOS_ROLLOUT_ALLOW_DIRTY=1` overrides when rolling
+   uncommitted content is deliberate. It also warns when the content comes from
+   something other than the merged `main@origin`.
+2. **The target must not change while the rollout runs.** The gate above only
+   describes the start; the orchestrator re-computes the digest before every node
+   and aborts if it moved — otherwise the early nodes would get one revision and the
+   later ones another. Such an abort touches nothing further and names the report.
+
+`--plan` stays read-only: it prints the dirty-file warning and the plan so you can
+see the situation, and does not refuse.
+
+Two consequences worth knowing before you start a roll:
+
+- `mbp-executor-1` runs from that same checkout, so it is by construction "at the
+  working tree" and reads as off-target whenever the tree has such changes.
+- an executor that runs from an editable tree is a task-correctness risk, not just a
+  bookkeeping one: `tsx` reads a module from disk the first time it is required, so a
+  half-finished edit can enter the execution path without any restart. Keep
+  `mbp-executor-1` on content you are willing to have run.
+
+For the same reason, compare a node against the *fleet target* rather than against
+your current checkout when a concurrent editor is active.
+
 
 Current dated evidence belongs in a rollout smoke such as
 `2026-07-12-node-version-rollout.md`, not in this reusable procedure.
+
+## Executor DB Modes
+
+Every executor declares one mode. The mode is a deployment contract, not a
+runtime guess: having `DATABASE_URL` does not make a node DB-backed, and a
+failed task-token heartbeat never falls back to the DB.
+
+| Mode | Startup | Required configuration | `/health` evidence |
+| --- | --- | --- | --- |
+| `required` (control plane, default) | `initDb` + migrations + agent stores + file-sync | `DATABASE_URL`; `GATEWAY_URL` when `EXECUTOR_TASK_TOKEN_MODE=required` | `db=postgres` |
+| `none` (stateless canary) | skips DB bootstrap, agent stores, and file-sync endpoints | `GATEWAY_URL`, `EXECUTOR_TASK_TOKEN_MODE=required`; **no** `DATABASE_URL` | `db=none`, `taskTokenMode=required`, `leaseTransport=http-when-token` |
+| undeclared (legacy) | current DB path | `DATABASE_URL` (this runbook's existing requirement), `GATEWAY_URL` recommended | `mode` warns; no mode is invented |
+
+**`none` is a canary and must not be described as the remote default.** P4
+closed **fail-closed**: a normal no-DB task completed with `eventBacklog=0` /
+`spoolBacklog=0`, but a gateway restart during a long task reaped that task as
+failed and converged its scheduled run to failed (the convergence evidence is
+manual/backfill; see the evidence doc §3.3). A task succeeding *across* a
+gateway restart has not been proven, and fail-closed is now the **final** P4
+semantics (`docs/adr/0050-p4-stateless-executor-fail-closed-semantics.md`);
+`none` is not promoted.
+
+A stateless node owns only local working state. It is owned by the **executor
+service user**, not the gateway, and is excluded from the deployed content
+digest and ship tarball:
+
+| Path (under the executor's cwd) | Owner / mode | Meaning |
+| --- | --- | --- |
+| `.los-runtime/executor-events/<nodeId>/` | service user; default umask (commonly `0755`/`0644`) | session-event spool, one subdirectory per task; replayed with the node credential |
+| `.los-runtime/executor-artifacts/<nodeId>/` | service user; default umask (commonly `0755`/`0644`) | local artifact CAS |
+| `.los-runtime/executor/node-credential-<nodeId>.json` | service user, file `0600` (parent dir created `0700`; pre-existing dirs are not re-tightened) | rotated per-node credential; takes precedence over `.env` on restart |
+
+The credential file is `0600`; the spool and artifact store are created with
+the service user's umask (commonly `0755` dirs / `0644` files) and the executor
+does not tighten them. On a multi-user node, `chmod 700` those two directories
+and `chmod 600` the files (or run the executor as the only user with access):
+session events and patches are not public data.
+
+Do not delete the spool to "clean up" a node: it holds events the gateway has
+not acknowledged. A non-zero `eventBacklog`/`spoolBacklog` is a sink lag, not a
+deploy failure; `LOS_DEPLOY_REQUIRE_ZERO_BACKLOG=1` turns it into a hard
+failure when a zero-backlog rollout is the acceptance condition.
+
+Verification has one policy implementation (`validate_mode_env`) and one env
+parser (`tools/executor-mode-snapshot.mjs`, which mirrors `loadEnvFile`). The
+parser is sent over stdin and runs on the node, so preflight works before sync
+and a BOM/NBSP line cannot get a different verdict from the executor. The
+policy runs in `preflight` (env only), `verify` (env + `/health`), the read-only
+`mode` command, and the local `mode-check` fixture entry point. Do not restate
+the rules in a second script.
+
+**The gate validates the `.env` deployment surface.** The process can also read
+`/etc/los/config.yaml`, `~/.los/config.yaml`, systemd `Environment=`/drop-ins,
+and a built-in default `DATABASE_URL`. Declare `DATABASE_URL` (or `none` plus
+`GATEWAY_URL`) in `.env`; a `required` node that relies on a YAML/unit/default
+DB URL is blocked by design, and an undeclared `.env` with health `db=none` is
+rejected as a mode mismatch rather than accepted as legacy.
+
+`tools/setup-node.sh` still writes a DB-mode `.env` (it requires
+`DATABASE_URL`) and does not write `EXECUTOR_DB_MODE`. That shape passes as
+**legacy + DATABASE_URL**; it is not blocked as `none`, because no `none`
+declaration exists yet. For a first-time no-DB bootstrap, remove
+`DATABASE_URL` first, then add `EXECUTOR_DB_MODE=none` plus
+`EXECUTOR_TASK_TOKEN_MODE=required` and `GATEWAY_URL`. Adding `none` while
+`DATABASE_URL` is still present is what `preflight` blocks.
 
 ## Preflight
 
@@ -49,19 +212,42 @@ Current dated evidence belongs in a rollout smoke such as
    ./tools/deploy-to-remote.sh <node> preflight
    ```
 
-4. Confirm `.env` exists with mode 600 and contains, without printing values:
-   `DATABASE_URL`, `EXECUTOR_AGENT_KEY`, `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`,
-   and `GATEWAY_URL`.
-   It must also be **readable by the deploy identity**: a `600`/`los:los` file
-   plus a non-root login (`oracle` uses `ubuntu` + sudo) makes both the version
-   stamp and `verify` fail without `LOS_REMOTE_PRIVILEGE=sudo`.
+4. Confirm `.env` declares a mode and contains the keys that mode requires,
+   without printing values:
+   - `EXECUTOR_DB_MODE=required`: `DATABASE_URL`, `EXECUTOR_AGENT_KEY`,
+     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, and `GATEWAY_URL` when
+     `EXECUTOR_TASK_TOKEN_MODE=required`.
+   - `EXECUTOR_DB_MODE=none`: `GATEWAY_URL`,
+     `EXECUTOR_TASK_TOKEN_MODE=required`, `EXECUTOR_AGENT_KEY`,
+     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`; `DATABASE_URL` **must be absent**.
+   - The mode must be explicit on a no-DB node. An undeclared mode is legacy
+     DB mode; preflight warns, it does not infer `none`.
+
+   The env must also be **readable by the deploy identity**: a `600`/`los:los`
+   file plus a non-root login (`oracle` uses `ubuntu` + sudo) makes both the
+   version stamp and `verify` fail without `LOS_REMOTE_PRIVILEGE=sudo`.
+   Mode is **not** uniformly `600` across the fleet, and the right shape follows
+   from who reads the file: macOS runs the executor as the owner, so `600`; a
+   Linux node whose `.env` is `root:root` and whose service user is `los` needs
+   `644` (a root-owned `600` file is unreadable to `los`). Do not "harden" that
+   second shape. `sync` now preserves whatever mode it finds — before
+   2026-10-11 the stamp rewrote `.env` with `awk`+`mv`, which recreated it with
+   umask permissions and silently turned `600` back into `644` on every rollout.
    The systemd unit must not override `EXECUTOR_HOST` or `EXECUTOR_PORT`; the
    node `.env` is the endpoint configuration source used by both runtime and
    deployment verification.
-5. Identify the database listener owner with `ss -tlnp` or `lsof`. Test an
-   actual query using the configured URL. A reachable port is insufficient.
-6. Confirm Node 22+, pnpm, Tailscale, `/opt/los` ownership, and free disk.
-7. On nodes below 2 GiB RAM, require swap and use `--low-resource`.
+5. Run `./tools/deploy-to-remote.sh <node> mode` (read-only) on an **existing**
+   node to validate the `.env` + `/health` mode contract before deploying.
+   `preflight` runs the same env gate and blocks on a violation. On a first
+   bootstrap there is no `/health` yet, so `mode` will fail its health half by
+   design; the env gate still applies and `verify` covers health after start.
+6. **Only for `EXECUTOR_DB_MODE=required`:** identify the database listener
+   owner with `ss -tlnp` or `lsof`. Test an actual query using the configured
+   URL. A reachable port is insufficient. For `none`, confirm the executor has
+   no connection to the DB port; the mode gate already proves `DATABASE_URL`
+   is absent.
+7. Confirm Node 22+, pnpm, Tailscale, `/opt/los` ownership, and free disk.
+8. On nodes below 2 GiB RAM, require swap and use `--low-resource`.
 
 Stop before cutover if configuration truth, process ownership, database
 identity, task load, or expected port is ambiguous.
@@ -98,6 +284,17 @@ procedure.
   digest match the fleet target;
 - bsdtar AppleDouble `._*` sidecars are suppressed and historical ones cleaned.
 
+The prune is what reconciles deleted or renamed sources, and it has to work on
+both GNU and BSD userlands: until 2026-10-11 it deleted the stale list with
+`xargs -a FILE -d '\n'`, which macOS's `xargs` rejects outright
+(`xargs: invalid option -- a`). On `m3pro-executor-1` that left exactly one
+renamed-away source file in place, so the node's digest could never equal the
+fleet target even though every byte of the transfer was correct — three
+consecutive rollouts restored it to the old revision. A stale path the prune
+cannot remove now fails the sync out loud, and the prune's output goes into the
+sync log instead of nowhere
+(`2026-10-11-macos-m3-sync-nonconvergence.md`).
+
 The default transport is Tailscale SSH as `root`. When a node instead uses an
 OpenSSH config alias or a non-root login with passwordless sudo, set transport
 details in the invoking environment rather than committing host credentials:
@@ -120,24 +317,35 @@ mid-transfer makes `sync` abort under `set -e` with the log ending mid-step: on
 sync on `tencent-sin`. Because the steps are idempotent, retrying the node is
 the recovery.
 
-**`sync` does not verify that the node converged — check the digest yourself.**
-The tar is streamed through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
-so a dropped connection leaves a *partially extracted tree*, and each retry then
-produces a different `build-version` digest. On 2026-10-06 that left
-`tencent-sin` with a half-synced tree whose executor crash-looped until systemd
-gave up (`Start request repeated too quickly`). Always confirm after `sync`:
+**`sync` asserts convergence on exit — read the guard's message before acting.**
+On exit the sync re-reads the node's own content digest and refuses to report
+success unless it equals the target. A mismatch has two very different causes,
+and the sync log now distinguishes them:
+
+| sync log says | meaning | action |
+| --- | --- | --- |
+| `prune: N stale file(s)` … `removed N stale file(s)`, digest matches | normal repair | none |
+| `prune: FAILED — could not remove stale path: …` | extra source files survive (BSD/GNU `rm` flag, permissions, `uchg`) | clear the obstacle and re-run; the tree itself is intact |
+| no `prune:` complaint, digest != target | source files are **missing** on the node | treat as half-synced: do NOT restart it; re-run the sync |
+
+That distinction matters because the transfer is otherwise silent: a successful
+`scp` plus a silent `tar xzf` used to leave a **0-byte sync log**, which reads
+exactly like "it died before transferring anything" and sends you after the
+transport instead of the prune (2026-10-11, M3, several hours).
+
+Always confirm after `sync` with the node's own digest:
 
 ```bash
 ssh <alias> 'cd <REMOTE_HOME> && bash tools/los.sh build-version'   # must equal the local target
 ```
 
-If it does not (or keeps changing between attempts), stop retrying the pipe and
-use **upload-then-extract** instead: `scp` the archive to `/tmp` on the node,
-compare `shasum -a 256` on both sides, then extract locally on the node. That
-path is resilient because a dropped control connection cannot truncate an
-already-complete file. Never leave a node in a half-synced state: a partially
-written `packages/` tree is worse than the previous revision, which at least
-started.
+If files really are missing (or the digest keeps changing between attempts),
+stop retrying and use **upload-then-extract** instead: `scp` the archive to
+`/tmp` on the node, compare `shasum -a 256` on both sides, then extract locally
+on the node. That path is resilient because a dropped control connection cannot
+truncate an already-complete file. Never leave a node in a half-synced state: a
+partially written `packages/` tree is worse than the previous revision, which at
+least started.
 
 The deployed version is a deterministic digest of deployable runtime content.
 Do not override `LOS_DEPLOY_VERSION` unless reproducing an explicitly recorded
@@ -161,11 +369,17 @@ artifact. The sync must include all workspace manifests covered by
    ```text
    systemd: active, enabled, User=los, NRestarts=0
    health: status=ok and expected version
+   mode: `deploy-to-remote.sh <node> mode` reports mode-check: ok
+         required -> health.db=postgres
+         none     -> health.db=none, taskTokenMode=required,
+                     leaseTransport=http-when-token, gateway reachable
    content: `bash tools/los.sh build-version` equals the local target digest
    registry: online, fresh heartbeat, same version, activeTaskCount=0
    process: no replaced unmanaged executor remains
    unirun: ok (<pinned version>) — else ssh dispatch stays on native ssh
    logs: no restart loop, DB auth failure, heartbeat failure, or missing path
+   no-DB only: eventBacklog=0, spoolBacklog=0, and no executor connection to
+               the database port (e.g. lsof/ss on 55432/5432)
    ```
 
 6. **Promote the node.** A restart always leaves the registry row
@@ -198,10 +412,36 @@ Windows nodes have no systemd, no `bash`, and no `shasum`; they run
 their SSH default shell is `cmd.exe`. `tools/deploy-to-remote.sh` is not usable
 there — on a host with WSL it silently targets WSL's filesystem instead.
 
-1. Confirm `pnpm-lock.yaml` has the same SHA-256 as the gateway host. If it
-   differs you must run a package install on the node before restarting, which
-   currently needs a manual step.
-2. Create a rollback point first (source trees only, never `node_modules`):
+The automated path is the driver, and the orchestrator runs it:
+
+```bash
+tools/los-fleet-rollout.sh --node desktop-srsbe20       # sync → install → activate → verify → promote
+```
+
+`tools/deploy-drivers/windows-service.sh <sync|install|activate|verify> <alias> C:/los <target> [node_id]`
+runs the individual steps when you need to do one by hand. The manual procedure
+below is the fallback for when the driver cannot reach the node.
+
+1. **Install the dependency graph (`install`).** `tar` ships sources only —
+   `node_modules` is never in the manifest — while the executor resolves
+   workspace packages through `packages\<pkg>\node_modules\@los\`. Any release
+   that adds or removes a workspace package therefore needs a package install
+   *before* the restart, or the node crash-loops under nssm on
+   `ERR_MODULE_NOT_FOUND` (2026-10-11: the new `@los/mcp-stdio` left both Windows
+   nodes without that link).
+   Two traps that made this look like "the machine has no toolchain":
+   - **PATH**: a non-interactive SSH session may not have `C:\Program Files\nodejs`
+     on `PATH` even though `node.exe`, `npm.cmd` and `pnpm.cmd` are installed
+     (`desktop-srsbe20` was mis-recorded for a day as "missing pnpm/corepack"
+     because of exactly this). Probe with `Test-Path`, not `where.exe`, and extend
+     `$env:Path` with `C:\Program Files\nodejs` and `%APPDATA%\npm`.
+   - **execution policy**: call the **`.cmd`** shim, not the bare name.
+     `Get-Command pnpm` prefers `pnpm.ps1`, and a non-interactive session's
+     default execution policy refuses scripts — the symptom is "pnpm is installed
+     but nothing runs".
+2. Confirm `pnpm-lock.yaml` has the same SHA-256 as the gateway host, then
+   `pnpm install --frozen-lockfile` in `C:\los`.
+3. Create a rollback point first (source trees only, never `node_modules`):
 
    ```powershell
    & C:\Windows\system32\tar.exe -czf C:\los\rollback-src-<ts>.tar.gz `
@@ -210,7 +450,7 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
      pnpm-workspace.yaml tsconfig.base.json turbo.json
    ```
 
-3. Ship and extract the same archive the Linux path builds. **Use the SSH
+4. Ship and extract the same archive the Linux path builds. **Use the SSH
    config alias, not an explicit `user@ip`** — an explicit target drops the
    alias's `IdentityFile` and the upload fails with `Permission denied`:
 
@@ -219,7 +459,17 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
    ssh <alias> 'powershell -NoProfile -Command "& C:\Windows\system32\tar.exe -xzf C:\los\los-sync-<version>.tar.gz -C C:\los"'
    ```
 
-4. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
+5. **Prune.** `tar` only adds and overwrites, so any source file the repository has
+   deleted since the last rollout stays on the node forever — and because the
+   content digest covers every source file, the node then *never* equals the fleet
+   target. Until 2026-10-11 the driver had no prune at all and both Windows nodes
+   had drifted (45 and 14 stale files, including an unzipped nssm source tree and
+   `packages/*/pkg.tar`). The driver now derives the manifest from the tarball
+   itself (`deploy-to-remote.sh tarball` writes `<tarball>.list`), uploads it, and
+   deletes what the node has but the manifest does not — never `node_modules`,
+   `.git` or `.env`, and never more than 500 paths at once.
+
+6. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
    line by line with last-wins semantics, so appending avoids rewriting the
    non-ASCII header:
 
@@ -229,29 +479,167 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
    Restart-Service los-executor -Force
    ```
 
-5. Verify **by content**, because the version stamp cannot: assert a file that
-   the target revision introduced actually exists (e.g.
-   `Test-Path C:\los\packages\agent\src\governance-seed-dedupe.test.ts`), then
-   check `/health` and the registry.
+7. Verify **four** things, not three. The stamp, the service state and a source
+   probe are all satisfiable by a node whose executor is crash-looping under
+   nssm — that is exactly how `desktop-srsbe20` sat "Running", stamped with the
+   new version, probe present, and never heartbeating again. Add the node's own
+   `/health` version:
+
+   ```powershell
+   (Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 8).version
+   ```
+
+   `svc=Running` + `stamped=<target>` + `probe=True` + `health=<target>`, then the
+   registry row. Without the last one the rollout can report a dead node as
+   "safely restored to the old revision".
+
+### Writing PowerShell for these nodes
+
+The driver uploads each script to `C:\Windows\Temp\los-<step>.ps1` and runs it
+with `-File` (see the header of `windows-service.sh` for why `-Command -` and
+`-EncodedCommand` both failed). If you add scripts, keep these four constraints:
+
+- the `.ps1` must start with a **UTF-8 BOM** — Windows PowerShell 5.1 otherwise
+  decodes it with the system ANSI code page and non-ASCII comments corrupt the
+  parse (a `}` reported as an unexpected token);
+- arguments must be quoted with **double** quotes — `cmd.exe` does not treat
+  single quotes as quoting, so the value arrives with literal quotes attached;
+- strip `\r` from captured output before anchored matching (`LC_ALL=C tr -d '\r'`,
+  and `LC_ALL=C` matters because CLIXML error text can be in a local code page);
+- do not suppress the CLIXML error stream; it is where PowerShell reports why a
+  command failed.
+
+### Node-local infrastructure stays OUT of the deployed tree
+
+The nssm wrapper is node-local (the repository does not carry the binary), so it must
+live **outside** `C:\los`:
+
+```text
+C:\los-node\nssm.exe          the service wrapper (BINARY_PATH_NAME)
+C:\los\                       the deployed tree — exactly what the tar ships
+```
+
+Keep it that way. The stale-file prune deletes everything under the covered trees
+that the shipped manifest does not list, and it cannot tell infrastructure from a
+leftover: when `tools\nssm.exe` lived inside the tree it was flagged stale on every
+sync and survived only because a running executable is locked — a sync that happened
+while the service was stopped would have deleted the wrapper and left a node that
+cannot start.
+
+To relocate a node that still has the legacy layout (2026-10-11, both Windows nodes):
+
+```powershell
+Copy-Item C:\los\tools\nssm.exe C:\los-node\nssm.exe -Force   # verify: certutil -hashfile … SHA256 on both
+sc.exe stop los-executor
+reg add HKLM\SYSTEM\CurrentControlSet\Services\los-executor /v ImagePath /t REG_EXPAND_SZ /d "C:\los-node\nssm.exe" /f
+# verify BEFORE starting: value must be exactly C:\los-node\nssm.exe (length 20, no stray characters)
+sc.exe start los-executor
+```
+
+**Do not do this with `sc config … binPath=` through a nested quoting layer** (bash →
+`cmd.exe` → PowerShell → `sc.exe`): it silently wrote a **leading space** into
+`ImagePath` (`" C:\los\tools\nssm.exe"`), which made every subsequent start fail with
+`[SC] StartService 失败 87: 参数错误` — a 15-minute outage on `desktop-r45553o` whose
+cause was invisible in `sc qc` (which only showed one extra blank). Use `reg add`, and
+assert the exact string before starting. If a start does fail, look for an **orphaned
+wrapper process** (`tasklist | findstr nssm`) — a failed start can leave one behind, and
+subsequent starts then fail until it is killed.
 
 ## macOS Nodes
 
-`mbp-executor-1` runs from the gateway's own checkout: restart it and the
-version follows the working tree. `m3pro-executor-1` runs from
-`~/.local/share/los` (a tar snapshot, no VCS) under launchd
-`com.echerlos.los-executor`; `tools/deploy-to-remote.sh` is not usable (it
-assumes systemd and a `los` user).
+**Both macOS nodes now have the same configuration**: the executor runs from
+`~/.local/share/los` (a content-synced tree, no VCS) under its own launchd label
+`com.echerlos.los-executor`, driven by `tools/deploy-drivers/macos-launchd.sh`.
+They differ only in transport:
 
-1. Ship the same include list by tar pipe and extract into the node root.
-2. Normalize modes and stamp `.env` exactly as on Linux — both platforms get
-   their version from `LOS_VERSION`/`EXECUTOR_VERSION` in that file.
-3. Restart through launchd (KeepAlive brings it straight back):
+| node | transport | how the orchestrator drives it |
+| --- | --- | --- |
+| `m3pro-executor-1` | ssh alias `m3-t` | `LOS_SSH_TRANSPORT=ssh` |
+| `mbp-executor-1` (this machine, the gateway host) | local | `LOS_SSH_TRANSPORT=local`, and the driver runs in place |
+
+Until 2026-10-11 `mbp-executor-1` ran from the **gateway's editable checkout**.
+That is why it was the fleet's most confusing node: its identity was "whatever the
+editor had on disk", `tsx` loads a module from disk the first time it is required,
+so an uncommitted edit could enter the execution path **without a restart**, and
+rolling it ran `los.sh restart` — bouncing the gateway too. Pinning it removed all
+three, and it is now the busiest node's normal configuration rather than a special
+case.
+
+**Only the executor restarts.** The gateway keeps running from the checkout; the
+launchd wrapper `com.los.daemon` is told `LOS_EXECUTOR_EXTERNAL=1` so it checks and
+starts **only** the gateway (`los.sh start-gateway`). Without that flag the wrapper
+would see 8090 as unhealthy and call `los.sh start`, resurrecting the old executor
+from the checkout to fight the pinned one for the port.
+
+`tools/deploy-to-remote.sh` **is** usable on macOS for `sync`, `install`,
+`digest` and `cmd`; `verify` and `restart` are not (they drive systemd). Drive it
+with the SSH transport and the node's own home:
+
+```bash
+LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET=m3-t \
+LOS_REMOTE_HOME=/Users/echerlos/.local/share/los LOS_REMOTE_PRIVILEGE=none \
+  ./tools/deploy-to-remote.sh m3pro-executor-1 sync
+```
+
+`tools/los-fleet-rollout.sh --node <macos-node>` runs the whole sequence
+(sync → install → plist → launchd restart → content+`/health` assertion →
+promote) and is the preferred path; only hand-roll it when the orchestrator is
+unavailable.
+
+1. `sync` — upload-then-extract, stale-file prune, and the version stamp.
+2. `install` — **do not skip this.** The executor resolves workspace packages
+   through `packages/*/node_modules/@los`, so any release that adds or removes a
+   workspace package needs `pnpm install` before the restart. On 2026-10-11 the
+   new `@los/mcp-stdio` package had no link on M3 and restarting there would have
+   crash-looped the executor on `ERR_MODULE_NOT_FOUND` — the same defect the
+   Windows driver hit. `install` now probes whether it can really become user
+   `los` (`su - los -c true`) and otherwise runs `pnpm` directly as the login
+   user. Never probe that user by name: on M3 `id -u los` **succeeds** (the
+   directory service resolves the unknown name to the current user, uid 501)
+   even though no `los` account exists.
+3. Stamp `.env` (`LOS_VERSION`/`EXECUTOR_VERSION`) — `sync` already does this,
+   so the orchestrator's extra `sed -i ''` is only a belt-and-braces repeat.
+4. Restart through launchd (KeepAlive brings it straight back):
 
    ```bash
-   ssh <alias> 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor'
+   tools/deploy-drivers/macos-launchd.sh install-plist <home> com.echerlos.los-executor
+   tools/deploy-drivers/macos-launchd.sh activate      <home> com.echerlos.los-executor
    ```
 
-4. Verify the content digest, `/health`, and the registry row.
+   `activate` unloads, **waits for the unload to finish**, then loads. `launchctl
+   bootout` is asynchronous, and bootstrapping straight after it fails with a
+   "still loaded / in progress" error — which is exactly how two rolls were lost on
+   2026-10-11 before the wait was added. Do not swallow launchctl's stderr while
+   debugging this: the driver prints all three errors when it gives up.
+
+5. Verify all three: the content digest, `/health.version`, and the registry row
+   plus `target_version`. `/health` is the evidence that the **new process** is
+   up; the registry heartbeat lags. `verify` cannot be used here (it drives
+   systemd), so the driver asserts the digest *and* `/health` itself:
+
+   ```bash
+   tools/deploy-drivers/macos-launchd.sh verify <home> com.echerlos.los-executor <target>
+   ```
+
+**The pinned tree keeps its own `.env`** (mode 600), like every other node — and
+that is a trap on the gateway host, where a secret rotation applied only to the
+checkout's `.env` leaves the pinned executor on the old value with no signal. The
+orchestrator compares the two files (version keys excluded) before each local roll
+and warns when they differ; it does not overwrite, because the node's port and
+identity are legitimately allowed to differ.
+
+**Rollback** (if the pinned executor misbehaves): `launchctl bootout
+gui/$(id -u)/com.echerlos.los-executor`, remove `LOS_EXECUTOR_EXTERNAL` from
+`~/Library/LaunchAgents/com.los.daemon.plist`, reload that plist, then
+`./tools/los.sh start-executor` — the node is back on the checkout.
+
+**`.env` mode is the node's own policy, and `sync` no longer rewrites it.** It
+holds `DATABASE_URL` and `EXECUTOR_AGENT_KEY`. M3 runs the executor as its owner
+and uses `600`; a Linux node whose `.env` is `root:root` keeps `644` so the `los`
+service user can read it. Until 2026-10-11 the stamp recreated the file through
+`awk`+`mv` and reset it to `0644` on every rollout, so tightening it by hand did
+not survive the next sync. The macOS node root belongs to the login user, so
+`chmod`, `launchctl` and the stamp need no sudo.
 
 ## Rollback
 
@@ -272,6 +660,30 @@ If verification fails:
 5. Record the failed target version, restored version, failure phase, and logs.
 
 Do not revive an abandoned shell-session process as the normal rollback path.
+
+### Rolling a no-DB node back to the DB
+
+`EXECUTOR_DB_MODE` is read at boot. Editing `.env` without restarting leaves
+the process on the old mode; there is no runtime auto-fallback in either
+direction. The recorded P3 rollback for node34 is `/opt/los/.env.p3-backup`.
+
+1. Stop `los-executor` through systemd and confirm the process is gone.
+2. Restore the prior `.env` (for node34: `cp /opt/los/.env.p3-backup
+   /opt/los/.env`). Confirm it contains `DATABASE_URL` and either
+   `EXECUTOR_DB_MODE=required` or no mode at all; remove
+   `EXECUTOR_DB_MODE=none` if the backup predates the key.
+3. Keep the node's `.los-runtime/executor-events/` and
+   `.los-runtime/executor/` state. Do not delete the spool during a rollback:
+   unacknowledged events are the only evidence of what the node saw.
+4. Start `los-executor` and run
+   `./tools/deploy-to-remote.sh <node> mode`. It must report `db=required`
+   (or `legacy`), `database=set`, and `health.db=postgres`.
+5. Re-check the registry row and promote only after `/health` and the mode gate
+   both pass.
+
+A rollback that restores DB mode while the gateway still expects the node's
+node credential is acceptable: the credential is additive and the gateway keeps
+accepting heartbeats without it.
 
 ## Offline Nodes
 
@@ -307,9 +719,24 @@ Open items:
   a successful verify. A rollout that forgets it leaves verified nodes idle.
 - **`promote` does not check the reported version**, so it can mark a stale node
   online from a lagging registry value.
-- **No content probe for Windows/macOS**, and no automated path at all for those
-  platforms. Windows upgrades depend on a hand-built archive plus a file
-  existence check.
+- **No macOS driver file.** The macOS sequence still lives as an inline branch in
+  `tools/los-fleet-rollout.sh` instead of `tools/deploy-drivers/macos-launchd`
+  (the split the rollout design calls for), so it cannot be reviewed or tested in
+  isolation. The macOS branch does now assert the content digest (via `sync`) and
+  `/health.version` (via the registry `base_url`), which it previously did not.
+- ~~**No content digest for Windows.**~~ **Resolved 2026-10-11**: the driver has a
+  `digest` step that runs `tools/deployable-content.mjs` on the node, so the
+  reconciler reads a real digest for Windows and skips converged nodes like any
+  other platform. Windows still has no `bash`, which is now irrelevant: the digest
+  is computed by Node, not by `shasum`, and Node is already a hard requirement.
+- **`.env` mode has no gate.** `sync` no longer resets it (fixed 2026-10-11), but
+  nothing checks it either, so the fleet legitimately holds both `600` (macOS,
+  owner-run) and `root:root 644` (Linux, so the `los` service user can read it).
+  A consistency check would have to encode that rule rather than demand `600`.
+- **macOS `unirun` install always warns.** `install` still calls
+  `tools/install-unirun.sh --dest /usr/local/bin`, which needs root; macOS nodes
+  therefore keep dispatching via native ssh. Skipping it on Darwin would make the
+  deploy log honest instead of permanently noisy.
 - **Maintenance windows do not gate scheduling.** `isNodeInMaintenance` is only
   consulted by fleet alerting, watch-state advancement, and host-check repair;
   the executor candidate filter never reads it. To actually stop work landing on

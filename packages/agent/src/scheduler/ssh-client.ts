@@ -243,6 +243,8 @@ export async function runAgentOnSSHExecutor(
     leaseMs: number;
     executionKernelKind: string;
     prompt: string;
+    /** Short-lived task token for the remote executor's HTTP heartbeat. */
+    taskToken?: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
@@ -258,6 +260,7 @@ export async function runAgentOnSSHExecutor(
     leaseMs: input.leaseMs,
     executionKernelKind: input.executionKernelKind,
     prompt: input.prompt,
+    ...(input.taskToken ? { taskToken: input.taskToken } : {}),
     config: input.config,
   };
 

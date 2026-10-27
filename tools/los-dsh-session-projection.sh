@@ -58,6 +58,35 @@ if [[ ! -s "$SRC_DB" ]]; then
   exit 1
 fi
 
+# 上游新鲜度门禁（2026-10-13 修竞态）：
+# 本作业与 com.echerlos.dsh-session-index **都是独立 3600s 定时**、无排序，而这里的
+# 守卫原先只查"源库非空"——实测两者会交错：10:05 本次投影读的库，是 09:38 那次 ingest
+# 的产物（下一次 ingest 10:38 还没跑）。⇒ 投影会把上一个小时的数据当成"当前"。
+# 判据改为读**上游心跳**（session-index-ingest 成功后原子写的那份），阈值给一小时
+# 周期留余量：上游若在 90 min 内成功过，本次投影就是在新鲜数据上工作；否则
+# **显式失败**（而不是照旧跑并报绿）——因为"上游没跑"必须与"上游跑了且干净"分开。
+SRC_HB="${SESSION_INDEX_HEARTBEAT:-$HOME/.dsh/storages/ledger/session-index-ingest.heartbeat}"
+SRC_HB_MAX_AGE="${SESSION_INDEX_HEARTBEAT_MAX_AGE:-5400}"
+if [[ ! -s "$SRC_HB" ]]; then
+  log "FAIL: 上游心跳缺失: $SRC_HB —— 判不了上游是否新鲜（index 侧尚未启用 ledger.sh？）"
+  exit 2
+fi
+SRC_HB_AGE="$(/usr/bin/python3 -c 'import json,sys,time
+try:
+    ts=json.load(open(sys.argv[1]))["ts"]/1000.0
+except Exception:
+    sys.exit(2)
+print("%.0f" % (time.time()-ts))' "$SRC_HB" 2>/dev/null)"
+if [[ -z "$SRC_HB_AGE" ]]; then
+  log "FAIL: 上游心跳不可解析: $SRC_HB（判不了 ≠ 过）"
+  exit 2
+fi
+if (( SRC_HB_AGE > SRC_HB_MAX_AGE )); then
+  log "FAIL: 上游 session-index 心跳 ${SRC_HB_AGE}s > 阈值 ${SRC_HB_MAX_AGE}s —— 本次不投影（避免把陈旧数据当当前）"
+  exit 1
+fi
+log "upstream fresh: heartbeat_age=${SRC_HB_AGE}s (max ${SRC_HB_MAX_AGE}s)"
+
 NODE="$(command -v node || true)"
 TSX="$(ls -d "$ROOT"/node_modules/.pnpm/tsx@*/node_modules/tsx/dist 2>/dev/null | head -1 || true)"
 if [[ -z "$NODE" || -z "$TSX" || ! -f "$CLI_ENTRY" ]]; then

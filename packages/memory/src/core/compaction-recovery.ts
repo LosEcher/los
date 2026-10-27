@@ -1,4 +1,4 @@
-import { CHECKPOINT_VERSION } from '@los/agent/session-recovery';
+import { CHECKPOINT_VERSION } from '@los/contracts/session-recovery';
 
 export interface RecoveryCheckpointInput {
   /** Checkpoint format version; absent means version 1. */

@@ -42,6 +42,15 @@ bash tools/ci-status-report.sh --trend 30
 Baseline drift is now visible: the static 08-09 baseline comment in
 `ci-status-report.sh` (wall 3.6–6.0m) vs measured median 6.5m on 08-16.
 
+> **2026-10-19 baseline.** After the runner egress repair and the gate-test
+> parallelization, the last 20 runs show wall median **5.8m**, gate-test
+> median **7.0m**, gate-fast **2.6m**, gate-web-e2e **1.5m**, gate-drift
+> **0.7m**. The 08-09 numbers remain useful as a historical sample, not as the
+> current target. Runs 815/816 (26.6m/53.9m) are the egress-incident
+> anomalies; run 818 is the first green run after the repair. See
+> `docs/operations/2026-10-19-forgejo-runner-egress-repair-and-ci-timeouts.md`
+> and `docs/operations/2026-10-19-gate-test-parallelization.md`.
+
 ## Alerting (A3)
 
 `ci-health-check.sh` exits 1 on: finished run wall > 15m (default), a

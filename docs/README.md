@@ -77,11 +77,22 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   preference and fallback policy.
 - `0044-acp-endpoint.md` - ACP (Agent Client Protocol) endpoint.
 - `0045-provider-tool-hot-reload.md` - provider/tool hot reload boundaries.
-- `0046-executor-sandbox-multi-backend.md` - executor sandbox multi-backend
-  abstraction (worktree/docker).
+- `0046-executor-sandbox-multi-backend.md` - **Superseded by 0047** (2026-10-10);
+  the proposed `SandboxBackend` interface was never implemented. Isolation
+  backends are owned by 0047 §5 and `config.isolation.backend`.
 - `0047-tool-project-and-provider-boundary-ownership.md` - tool/project/provider
   boundary ownership: layer model, single-writer rule, provider conflict
   adjudication, memory canonical split, `dsfolder` structure, gate tri-state.
+- `0048-route-admission-and-read-scope.md` - HTTP route admission
+  classification and read scope.
+- `0050-p4-stateless-executor-fail-closed-semantics.md` - P4 final semantics:
+  fail-closed (lease/restart) is accepted, `EXECUTOR_DB_MODE=none` stays a
+  canary, and the six gates required before promotion.
+
+> `0049` is **retired / do not reuse**: it was declared-versus-consumed
+> reconciliation but never merged, and references to "ADR 0049" in older
+> architecture notes are historical. `0050` is the ADR in this list; the next
+> free number is `0051`.
 
 > Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
 > (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
@@ -102,6 +113,79 @@ Use `operations/node-deployment-runbook.md` for executor bootstrap, rollout,
 rollback, and offline-node reactivation. Keep dated node evidence in a separate
 operation smoke.
 
+Use `operations/2026-10-11-macos-m3-sync-nonconvergence.md` for the macOS node
+whose content sync never converged: a GNU-only `xargs` flag in the stale-file
+prune, why the empty sync log pointed the investigation at the transport instead,
+the macOS `install` gap that would have crash-looped the executor on the next
+restart, and the replay/negative-control evidence for each.
+
+Use `operations/2026-10-12-provider-health-probe-and-fleet-convergence.md` for the
+provider health surface: why a probe that only issues `GET {baseUrl}/models` structurally
+pins every `anthropic-messages` provider to `unhealthy`, the per-wire dispatch that
+replaced it, the real-call outcomes wired into scoring, the executor's two competing
+managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
+the credential single-source convergence, and the falsified premises kept as evidence.
+
+Use `operations/2026-10-19-gate-test-parallelization.md` for the gate-test
+wall experiment: agent groups and packages now run concurrently, cutting the
+critical path from ~10.2m to ~7.0m (runs 1429/1430).
+
+Use `operations/2026-10-19-forgejo-runner-egress-repair-and-ci-timeouts.md`
+for the 2026-10-19 runner incident: job containers could not reach the npm
+registry because the injected proxy was on the Windows host loopback; the
+portproxy/firewall + `no_proxy` + rootful runner invocation, the 8-minute
+install bound, and the run 817→818 evidence. **Its proxy injection is partly
+superseded on 2026-10-28** (see the next entry); the install bound still stands.
+
+Use `operations/2026-10-28-forgejo-runner-proxy-removal-and-preflight-probe.md`
+for the 2026-10-28 reversal: the injected proxy address is unreachable from job
+containers (direct `200`/0.77 s vs proxy `curl (28)`/8 s, measured from the CI
+image), so the proxy env was removed from `container.options`; the preflight was
+restricted to `registry.npmjs.org/-/ping` because the old check downloaded a
+5.7 MB packument under an 8 s budget and therefore measured throughput, not
+reachability. Includes the runner-container-exited layer, the run 1668/1669 →
+1670 evidence, and the rollback points.
+
+Use `operations/2026-10-19-stateless-promote-fix.md` for the follow-up that
+made `promote`/`drain` gateway-side control-plane commands, so stateless nodes
+(no `getDb()`) no longer return 500 from their command endpoint; includes the
+node34 live promote and the gateway restart evidence.
+Use `operations/2026-10-19-b2-canary-rollout.md` for the node34 B2 canary
+rollout: target digest `b191b9d28dac2`, live `run_shell` denial with
+`enforcementMode=block`, rollback artifacts, and the finding that
+`deploy-to-remote.sh promote` cannot run on a stateless node (the registry was
+already online).
+
+Use `operations/2026-10-19-b2-approval-and-convergence-hardening.md` for the
+B2 follow-up that closed ADR 0050's three gaps: stateless approval now forces
+`block`, the orphan sweep covers succeeded tasks, completion signals
+`scheduledConvergencePending`, and reaper run_spec failures are logged.
+
+Use `operations/2026-10-18-p4-fail-closed-evidence.md` for the P4 decision
+evidence: the acceptance criteria, node34 health and backlog, the zero
+running/claimed scheduled-run count, and the reaper/orphan convergence rows
+(labelled manual/backfill — they do not prove the automatic sweep) that make
+fail-closed observable.
+
+Use `operations/2026-10-18-executor-db-mode-deployment-contract.md` for the
+`EXECUTOR_DB_MODE` deployment contract: the acceptance criteria written before
+the change, the mode-aware preflight/verify gates in `deploy-to-remote.sh`, the
+`.env`/spool/credential ownership rules, node34 live evidence, and the
+negative-control matrix (a `none` node with `DATABASE_URL` must fail, not warn).
+
+Use `architecture/2026-10-11-cross-platform-content-identity-design.md` for why the
+deployable-content digest is a single Node implementation that bash and PowerShell
+both call (rather than a bash pipeline plus a PowerShell copy), what it covers and
+deliberately excludes, how equivalence to the old pipeline was proven before the
+switch, and the designed phase 2 where nodes report their digest in the heartbeat.
+
+Use `operations/2026-10-11-windows-node-recovery-and-driver-hardening.md` for the
+Windows side of the same defect family: why `desktop-srsbe20` was mis-recorded as
+"missing pnpm" (a non-interactive PATH that hides a working toolchain), the
+`install` step and per-marker `sync` assertions the driver gained, the `/health`
+assertion that stops `verify` from vouching for an nssm crash loop, and the four
+PowerShell-over-SSH traps hit while writing it.
+
 Use `operations/database-migrations.md` for migration ownership, startup
 application behavior, drift validation, and failure handling. Use
 `operations/github-mirror-recovery.md` when the secondary GitHub `main` has
@@ -116,6 +200,47 @@ and GitHub `gh` authentication.
 Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
+
+Use `architecture/2026-10-11-remote-execution-policy-divergence-analysis.md` for why a
+remote run declared read-only and sandboxed actually executed write-capable without a
+sandbox, and for the three concrete fixes (silent toolMode coercion, the inert
+sandboxMode pairing, and declared checks that neither run nor get recorded).
+
+Use `architecture/2026-10-11-cross-device-task-handling-phased-design.md` for the phased
+design (P0 observability → P1 placement → P2 multi-device fan-out → P3 storage → P4
+governance) of cross-device and cross-project task handling on the M1/M3/Win fleet.
+
+Use `architecture/2026-10-18-remote-workspace-handoff-adversarial-review.md` for the
+adversarial review that killed the "build a full Workspace Lease platform first"
+plan: why the next step is one end-to-end handoff/recovery spike, the four storage
+boundaries (git / worktree / artifact / losvault), the five mechanical lease
+failures, and the revised batch plan.
+
+Use `architecture/2026-10-18-executor-db-mode-and-state-ownership.md` for the explicit
+`required`/`none` decision, why runtime DB auto-fallback is rejected, the current
+no-DB canary status, and the event-sink work required before promoting it.
+
+Use `architecture/2026-10-18-task-token-heartbeat-and-stateless-executor.md` for the
+task-token delivery gap (mint exists, dispatch consumes nothing), the HTTP-heartbeat
+phase A contract and failure semantics, why "remove DATABASE_URL" is a four-stage
+stateless-executor project rather than one endpoint, and the per-tool scope /
+`los tools --check` governance plan.
+
+Use `architecture/2026-10-11-cross-project-and-cross-device-task-model-review.md` for the
+three-layer review of cross-project and cross-device task handling: what holds today
+(dispatch per project, aggregate reads), what does not (per-project run views, remote
+execution), and the prioritized gap list with acceptance criteria.
+
+Use `architecture/2026-10-11-execution-node-selection-and-remote-runs.md` for why
+node selection cannot be a simple `/chat` passthrough: chat runs execute in the
+gateway process, remote dispatch lives in the scheduler path, and the ledger shows
+no remote agent run in the last seven days.
+
+Use `operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` for the
+DSH→los cross-project dispatch audit (why a non-operator `los_run` was pinned to
+the default project regardless of `projectId`), the `operatorScope` opt-in and
+fail-loud guard that replaced the silent mis-scoping, and the remaining
+`verify`/`approve`/`cancel`/async gaps.
 
 Use `operations/otel-bridge.md` for the local OTLP/HTTP bridge port, protocol,
 health/status endpoints, external collector boundary, and failure checks.

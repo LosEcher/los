@@ -37,6 +37,13 @@ export interface RunToolCallsInput {
   emitEvent: EmitEvent;
   onSessionError: (err: SessionErrorRecord) => void;
   preActionGateConfig?: PreActionGateConfig;
+  /**
+   * Consulted after each tool batch. Returning true means an operator drain
+   * (finish_current_tool / immediate) arrived while tools were running: do not
+   * launch any further tool in this turn. The remaining calls still get a
+   * tool_result so the assistant/tool pairing stays valid.
+   */
+  drainCheck?: () => Promise<boolean>;
 }
 
 interface ToolCallResult {
@@ -74,7 +81,9 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
   const results: ToolCallResult[] = [];
   let batch: Array<() => Promise<ToolCallResult>> = [];
 
+  let drained = false;
   for (const plan of plans) {
+    if (drained) break;
     const isParallelizable = broker.isParallelizable(plan.tc.function.name);
 
     if (isParallelizable) {
@@ -86,17 +95,43 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
         const batchResults = await Promise.all(batch.map(fn => fn()));
         results.push(...batchResults);
         batch = [];
+        if (input.drainCheck && await input.drainCheck()) {
+          drained = true;
+          continue;
+        }
       }
       // Execute the mutating tool sequentially
       const result = await plan.execute();
       results.push(result);
+      if (input.drainCheck && await input.drainCheck()) {
+        drained = true;
+      }
     }
   }
 
   // Flush any remaining batch
-  if (batch.length > 0) {
+  if (!drained && batch.length > 0) {
     const batchResults = await Promise.all(batch.map(fn => fn()));
     results.push(...batchResults);
+    if (input.drainCheck && await input.drainCheck()) drained = true;
+  }
+
+  if (drained) {
+    const executed = new Set(results.map(result => result.index));
+    for (const plan of plans) {
+      if (executed.has(plan.index)) continue;
+      const reason = 'Not executed: operator drain (finish_current_tool)';
+      results.push({
+        index: plan.index,
+        callId: plan.tc.id,
+        toolName: plan.tc.function.name,
+        content: reason,
+        ok: false,
+        denied: false,
+        durationMs: 0,
+        error: reason,
+      });
+    }
   }
 
   // Sort back to original order so model sees results in call order

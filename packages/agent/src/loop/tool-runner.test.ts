@@ -55,6 +55,7 @@ function mockRegistry(
       return tools.map(t => ({
         name: t.name,
         inputSchema: {},
+        scope: [],
         permissions: [],
         riskLevel: 'L0' as const,
         timeoutMs: 10_000,
@@ -103,6 +104,7 @@ function buildPolicy(): Resolver {
     maxRiskLevel: 'L2',
     allowWrites: true,
     sandboxAvailable: false,
+    deniedPermissions: undefined,
     retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
   };
 }
@@ -455,4 +457,39 @@ test('denied tool returns error in result but preserves ordering', async () => {
   // First result is denied — content should be the denial reason
   assert.ok(result.toolResults[0].includes('blocked by test'), `Expected denial msg, got: ${result.toolResults[0]}`);
   assert.ok(result.toolResults[1].includes('result:search_content'));
+});
+
+test('operator drain stops launching further tools and still answers every tool_call', async () => {
+  const registry = mockRegistry([
+    { name: 'write_a', parallelizable: false, sleepMs: 5, sideEffect: true },
+    { name: 'write_b', parallelizable: false, sleepMs: 5, sideEffect: true },
+    { name: 'write_c', parallelizable: false, sleepMs: 5, sideEffect: true },
+  ]);
+  const { runToolCalls } = await import('./tool-runner.js');
+
+  let checks = 0;
+  const result = await runToolCalls({
+    toolCalls: [tc('a', 'write_a'), tc('b', 'write_b'), tc('c', 'write_c')],
+    turn: 1,
+    tools: registry,
+    config: buildConfig(),
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: mockEmitEvent as any,
+    onSessionError: () => {},
+    // Operator drain arrives while the first tool is running.
+    drainCheck: async () => {
+      checks += 1;
+      return checks === 1;
+    },
+  });
+
+  // Only the in-flight tool ran...
+  assert.deepEqual(registry.executionOrder, ['write_a']);
+  // ...but the model still gets one result per tool_call, in order.
+  assert.equal(result.toolResults.length, 3);
+  assert.equal(result.toolMessages.length, 3);
+  assert.match(result.toolResults[1]!, /Not executed: operator drain/);
+  assert.match(result.toolResults[2]!, /Not executed: operator drain/);
+  assert.equal(result.toolMessages[2]!.tool_call_id, 'c');
 });

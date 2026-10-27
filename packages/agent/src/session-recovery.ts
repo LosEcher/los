@@ -40,7 +40,14 @@ const log = getLogger('session-recovery');
  * @los/agent/session-recovery (memory → agent is the existing dependency
  * direction).
  */
-export const CHECKPOINT_VERSION = 1;
+/**
+ * The reader's current checkpoint format version. Re-exported from `@los/contracts`
+ * so `@los/memory` can read the same value without depending on this package
+ * (control-plane truth remediation §9) — and imported here so this module's own
+ * version checks use it too.
+ */
+import { CHECKPOINT_VERSION } from '@los/contracts/session-recovery';
+export { CHECKPOINT_VERSION };
 
 /**
  * True when the checkpoint format version is readable by this runtime.

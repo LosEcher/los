@@ -3,7 +3,7 @@
  * Extracted from provider-routes.ts to keep each file under 400 lines.
  */
 import type { FastifyInstance } from 'fastify';
-import { discoverAll, scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
+import { describeProviderReadiness, discoverAll, scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
 import { getConfig, setConfig } from '@los/infra/config';
 import {
   createProviderAccount,
@@ -153,16 +153,29 @@ export function registerProviderCrudRoutes(
     const config = getConfig();
     const modelSet = new Map<string, {
       provider: string; model: string; source: string; enabled: boolean;
-      hasApiKey: boolean; baseUrl?: string | null;
+      hasApiKey: boolean; baseUrl?: string | null; unavailableReason?: string | null;
     }>();
     const discoveryReport = await discoverAll().catch(() => ({ providers: [] }));
     for (const dp of discoveryReport.providers) {
       if (!dp.available) continue;
       const key = `${dp.name}::${dp.defaultModel ?? '*'}`;
       if (modelSet.has(key)) continue;
+      // 发现的条目**不一定可调用**，此前这里硬编码 `enabled:true, hasApiKey:false,
+      // baseUrl:null` ⇒ 响应把"发现了但没有凭据/端点"的路由报成可用。
+      // 2026-10-12 实测（packycode）：codex 的 `~/.codex/auth.json` 走 OAuth
+      // （`auth_mode:"chatgpt"` + tokens，los 拿不到 API key），该条目被报成
+      // `enabled:true / hasApiKey:false / baseUrl:null`；而同一 provider 的
+      // cc-switch/grokbuild 条目是真能用的。两个条目混在一个 `models[]` 里，
+      // 消费方无法区分，且 per-provider 健康探针会在两者之间摇摆
+      // （`GET {baseUrl}/models`，baseUrl 为 null 时连 URL 都构造不出）。
+      // 如实标注：`ready` 已经区分 api_key 与 oauth（readiness.ts:55）。
+      const readiness = describeProviderReadiness(dp);
       modelSet.set(key, {
         provider: dp.name, model: dp.defaultModel ?? 'unknown', source: dp.source ?? 'discovery',
-        enabled: true, hasApiKey: false, baseUrl: null,
+        enabled: readiness.ready,
+        hasApiKey: typeof dp.apiKey === 'string' && dp.apiKey.length > 0,
+        baseUrl: dp.baseUrl ?? null,
+        unavailableReason: readiness.ready ? null : readiness.blocker,
       });
     }
     for (const [name, p] of Object.entries(config.providers)) {
@@ -184,7 +197,13 @@ export function registerProviderCrudRoutes(
     }
     const providers = [...results.reduce((map, item) => {
       const existing = map.get(item.provider);
-      const modelInfo = { id: item.model };
+      // 每个 entry 自带可调用性。聚合层用 OR（下面那几行）是有意的——一个 provider
+      // 只要**有一条**路由可用就算可用；但 `models[]` 必须逐条如实，否则消费方
+      // 看不到"这条路由为什么不可用"（packycode 的 codex 条目就是这种）。
+      const modelInfo = {
+        id: item.model, enabled: item.enabled, hasApiKey: item.hasApiKey,
+        baseUrl: item.baseUrl ?? null, unavailableReason: item.unavailableReason ?? null,
+      };
       if (existing) {
         if (!existing.models.some(m => m.id === item.model)) existing.models.push(modelInfo);
         existing.count = existing.models.length;
@@ -204,7 +223,7 @@ export function registerProviderCrudRoutes(
     }, new Map<string, {
       provider: string; ok: boolean; enabled: boolean; hasApiKey: boolean;
       source: string; model: string; baseUrl: string | null; count: number;
-      models: Array<{ id: string }>;
+      models: Array<{ id: string; enabled: boolean; hasApiKey: boolean; baseUrl: string | null; unavailableReason: string | null }>;
     }>()).values()];
 
     return { provider: providerFilter ?? null, count: results.length, models: results, providers };

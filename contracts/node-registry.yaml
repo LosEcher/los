@@ -74,9 +74,21 @@ properties:
     additionalProperties: true
   capabilities:
     type: object
+    description: >
+      ⚠️ **2026-10-12 按实测重写**：下列键是活库 36 个节点 `capabilities_json` 的**键并集**
+      （括号内为出现次数）。契约旧版声明的 `network_egress`/`proxy_egress`/`ingress_callback`/
+      `model_route` **实测从未出现**（0/36）⇒ 归入 `notCollectedToday`，不再当作既有字段；
+      同时补上旧版漏掉的 7 个实测键（含 `file_sync_folders` —— 当前"工作区"维度**唯一**的真源）。
     properties:
       run_agent:
         type: boolean
+        description: 36/36
+      shell:
+        type: boolean
+      sandbox:
+        type: string
+        description: >
+          Isolation backend name（9/36）。`tool_policy` 与 `native` 不满足沙箱要求。
       stream_ndjson:
         type: boolean
       task_lease:
@@ -85,20 +97,35 @@ properties:
         type: boolean
       workspace_write:
         type: boolean
-      shell:
+      deploy_safe:
         type: boolean
-      sandbox:
+      heavy_task_safe:
+        type: boolean
+      artifact_transfer:
+        type: boolean
+      node_command_runner:
+        type: boolean
+        description: 是否接受 `run-check` 等节点命令（见 contracts/node-command.yaml）。
+      file_sync_scan:
+        type: boolean
+      file_sync_deep_verify:
+        type: boolean
+      resourceClass:
         type: string
-        description: Isolation backend name. `tool_policy` and `native` do not satisfy a sandbox requirement.
-      network_egress:
-        type: boolean
-        description: Whether executor tasks can make policy-approved outbound network connections.
-      proxy_egress:
-        type: boolean
-      ingress_callback:
-        type: boolean
-      model_route:
-        type: boolean
+        description: >
+          8/36。注意它**不是 DB 列**：读取时按 `capacity.resourceClass → capabilities.resourceClass
+          → 内存兜底` 现算（见 packages/agent/src/executor-nodes.ts 的派生逻辑）。
+      versionSource:
+        type: string
+      file_sync_folders:
+        type: list
+        itemFields: [name, path, folder, mode]
+        description: >
+          3/36。节点声明的同步目录 —— 在 `managed_workspaces` 表为空（实测 0 行）的现状下，
+          这是"工作区"维度**唯一**可得的真源。
+    notCollectedToday:
+      description: 声明但实测 0/36 出现（旧版契约列过；保留记录以免后人再认作既有字段）。
+      keys: [network_egress, proxy_egress, ingress_callback, model_route]
       deploy_safe:
         type: boolean
         description: Whether the node can safely run pnpm install / build. Default false for constrained_executor.
@@ -107,25 +134,64 @@ properties:
         description: Whether the node can accept build, long-task, or batch-file-task scheduling. Default false for constrained_executor.
   capacity:
     type: object
+    description: >
+      ⚠️ **2026-10-12 按实测重写**：本字段此前声明为 9 个 snake_case 键
+      （`memory_total_mb` 等），而**活库 36 个节点的 `capacity_json` 里一个都不存在** ——
+      **零重叠**：实际写入的是 camelCase（`memoryTotalMb` 等）。契约不能是本字段的真源，
+      真源是 `executor-heartbeat.ts` 的心跳载荷 + `ExecutorNodeCapacity`
+      （`packages/agent/src/executor-nodes.ts`）。下面列出的是**实测键并集**（含出现次数/36）。
+      命名不改实现：`capacity.memoryTotalMb` 已被 web 端消费（nodes-page 的内存/磁盘压力显示），
+      改实现等于为一份从未生效的契约做一次跨包破坏性迁移。
     properties:
-      memory_total_mb:
+      # —— 每台节点都上报（9/36：全部 executor） ——
+      pid:
         type: integer
-      memory_available_mb:
+      arch:
+        type: string
+      platform:
+        type: string
+      memoryTotalMb:
         type: integer
-      swap_total_mb:
+      memoryAvailableMb:
         type: integer
-      swap_used_mb:
+      # —— 按平台能力上报（5/36；Linux 侧 cgroup/PSI 才有） ——
+      swapTotalMb:
         type: integer
-      disk_free_gb:
+      swapUsedMb:
+        type: integer
+      psiMemoryFull:
         type: number
-      psi_memory_some:
+        description: PSI memory full（无 some 变体；契约此前声明的 `psi_memory_some` 从未被写入）。
+      psiIoFull:
         type: number
-      psi_memory_full:
+      # —— 仅部分版本/平台上报（3/36） ——
+      cpuCores:
+        type: integer
+      cpuModel:
+        type: string
+      cpuLoad1m:
         type: number
-      psi_io_some:
-        type: number
-      psi_io_full:
-        type: number
+      kernelVersion:
+        type: string
+      sampledAt:
+        type: string
+        format: date-time
+      # —— 采集面较新，目前只有个别节点（1/36） ——
+      diskReadBytes:
+        type: integer
+      diskWriteBytes:
+        type: integer
+      networkRxBytes:
+        type: integer
+      networkTxBytes:
+        type: integer
+    notCollectedToday:
+      description: >
+        **声明但从未被写入的键**（契约旧版列过，实测 0/36）：`disk_free_gb`、`psi_memory_some`、
+        `psi_io_some`。其中 `diskFreeGb` 特别值得注意：**web 端 `nodes-page.tsx` 的
+        `diskPressure()` 正在读它** ⇒ 磁盘压力显示实际上一直是"未知"。这是采集面的缺口
+        （应在 heartbeat 里补磁盘空闲），不是命名问题；本次只如实记录，不在此变更里实现。
+      keys: [disk_free_gb, psi_memory_some, psi_io_some]
   verified:
     type: object
     description: Probe or heartbeat verification keyed by connect mode.

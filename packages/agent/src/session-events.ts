@@ -8,14 +8,11 @@
  *
  * This is the durable base layer for later JS/SQL query surfaces.
  */
-
 import { getDb, type DbTransactionClient } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { assertSessionEventType, isKnownSessionEventType } from './event-types.js';
 import { redactPayload } from './event-redaction.js';
-
 const log = getLogger('agent');
-
 export interface SessionEventUsage {
   promptTokens: number;
   completionTokens: number;
@@ -23,9 +20,7 @@ export interface SessionEventUsage {
   cacheMissTokens: number;
   totalTokens: number;
 }
-
 export type SessionEventVisibility = 'public' | 'audit' | 'internal';
-
 /** Classify an event type into its visibility tier.
  *  - public: user-facing events (tool calls, model responses, task lifecycle)
  *  - audit:  observability bookmarks (session started, tool catalog, governance)
@@ -50,7 +45,6 @@ export function sessionEventVisibility(type: string): SessionEventVisibility {
   }
   return 'public';
 }
-
 export interface ListSessionEventsOptions {
   /** When false, omit internal-tier rows. Default true (full ledger for tests/SSE). */
   includeInternal?: boolean;
@@ -97,6 +91,8 @@ export interface SessionEventWrite {
   usage?: Partial<SessionEventUsage>;
   parentEventId?: number;
   visibility?: SessionEventVisibility;
+  /** Idempotency id for executor→gateway retries. */
+  clientEventId?: string;
   payload?: Record<string, unknown>;
 }
 
@@ -154,6 +150,7 @@ CREATE TABLE IF NOT EXISTS session_events (
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   parent_event_id BIGINT,
   visibility TEXT,
+  client_event_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -164,6 +161,7 @@ ALTER TABLE session_events ADD COLUMN IF NOT EXISTS node_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS trace_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS visibility TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS client_event_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_events_tenant_project ON session_events(tenant_id, project_id);
@@ -177,6 +175,9 @@ CREATE INDEX IF NOT EXISTS idx_session_events_model ON session_events(model);
 CREATE INDEX IF NOT EXISTS idx_session_events_tool_name ON session_events(tool_name);
 CREATE INDEX IF NOT EXISTS idx_session_events_cache_key ON session_events(cache_key);
 CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_client_event
+  ON session_events(session_id, client_event_id)
+  WHERE client_event_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_operator_control_consumed
   ON session_events(session_id, parent_event_id)
   WHERE type = 'operator.control.consumed' AND parent_event_id IS NOT NULL;
@@ -229,9 +230,10 @@ export async function appendSessionEvent(
     INSERT INTO session_events (
       session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
       turn, type, source, model, tool_name, cache_key, cache_hit,
-      usage_json, payload_json, parent_event_id, visibility
+      usage_json, payload_json, parent_event_id, visibility, client_event_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17, $18)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17, $18, $19)
+    ON CONFLICT DO NOTHING
     RETURNING *
   `;
   const params = [
@@ -253,11 +255,24 @@ export async function appendSessionEvent(
       JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
       parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
+      input.clientEventId ?? null,
   ];
   const rows = options.client
     ? await options.client.query<SessionEventRow>(sql, params)
     : await getDb().query<SessionEventRow>(sql, params);
-  const row = rows.rows[0];
+  let row = rows.rows[0];
+  if (!row && input.clientEventId) {
+    const existing = options.client
+      ? await options.client.query<SessionEventRow>(
+        'SELECT * FROM session_events WHERE session_id = $1 AND client_event_id = $2 LIMIT 1',
+        [input.sessionId, input.clientEventId],
+      )
+      : await getDb().query<SessionEventRow>(
+        'SELECT * FROM session_events WHERE session_id = $1 AND client_event_id = $2 LIMIT 1',
+        [input.sessionId, input.clientEventId],
+      );
+    row = existing.rows[0];
+  }
   if (!row) {
     throw new Error('Failed to append session event');
   }
@@ -290,7 +305,7 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
   const columns = [
     'session_id', 'tenant_id', 'project_id', 'user_id', 'node_id', 'request_id', 'trace_id',
     'turn', 'type', 'source', 'model', 'tool_name', 'cache_key', 'cache_hit',
-    'usage_json', 'payload_json', 'parent_event_id', 'visibility',
+    'usage_json', 'payload_json', 'parent_event_id', 'visibility', 'client_event_id',
   ];
 
   // Build a single multi-row INSERT ... VALUES ... RETURNING *
@@ -325,12 +340,14 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
       JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
       parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
+      input.clientEventId ?? null,
     );
   }
 
   const sql = `
     INSERT INTO session_events (${columns.join(', ')})
     VALUES ${valuePlaceholders.join(', ')}
+    ON CONFLICT DO NOTHING
     RETURNING *
   `;
 

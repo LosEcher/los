@@ -14,10 +14,7 @@ import type {
   MCPAdapterConfig,
   MCPDiscoveredTool,
 } from '../../cantool-capability-adapter.js';
-import {
-  MCPStdioTransport,
-  type JSONRPCMessage,
-} from './mcp-stdio-transport.js';
+import { MCPStdioClient } from '@los/mcp-stdio';
 import { MCPSSETransport } from './mcp-sse-transport.js';
 import { MCPStreamableHTTPTransport } from './mcp-streamable-http-transport.js';
 import type { MCPTransport } from './mcp-transport.js';
@@ -42,7 +39,14 @@ export interface MCPServerConfig {
   adapterConfig?: MCPAdapterConfig;
 }
 
-export interface MCPToolDef extends MCPDiscoveredTool {}
+export interface MCPToolDef extends MCPDiscoveredTool {
+  /**
+   * Mirrors the leaf's descriptor index signature. Without it the agent's
+   * descriptor is not assignable to the leaf's, and `getTools()` — which every
+   * consumer reads — could not be narrowed in this subclass.
+   */
+  [key: string]: unknown;
+}
 
 export interface MCPServerIdentity {
   name?: string;
@@ -64,194 +68,113 @@ interface MCPToolCallResult {
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const REQUEST_TIMEOUT_MS = 60_000;
 
-// ── Transport factory ──────────────────────────────────
+// ── Remote transports (agent-only) ──────────────────────
 
-function createTransport(config: MCPServerConfig): MCPTransport {
-  const transport = config.transport ?? (config.command ? 'stdio' : 'sse');
-
-  switch (transport) {
-    case 'stdio': {
-      if (!config.command) {
-        throw new Error('MCP stdio transport requires a command');
-      }
-      return new MCPStdioTransport(
-        config.command,
-        config.args ?? [],
-        config.env,
-      );
-    }
-    case 'sse': {
-      if (!config.url) {
-        throw new Error('MCP SSE transport requires a url');
-      }
-      return new MCPSSETransport(config.url, config.headers);
-    }
-    case 'streamable-http': {
-      if (!config.url) {
-        throw new Error('MCP streamable-http transport requires a url');
-      }
-      return new MCPStreamableHTTPTransport(config.url, config.headers);
-    }
-    default:
-      throw new Error(`Unknown MCP transport: ${transport}`);
+function createRemoteTransport(config: MCPServerConfig): MCPTransport {
+  if (config.transport === 'sse') {
+    if (!config.url) throw new Error('MCP SSE transport requires a url');
+    return new MCPSSETransport(config.url, config.headers);
   }
+  if (config.transport === 'streamable-http') {
+    if (!config.url) throw new Error('MCP streamable-http transport requires a url');
+    return new MCPStreamableHTTPTransport(config.url, config.headers);
+  }
+  throw new Error(`Unknown MCP transport: ${config.transport}`);
 }
 
 // ── MCP Client ──────────────────────────────────────────
 
-export class MCPClient {
-  private transport: MCPTransport;
-  private requestId = 0;
-  private pending = new Map<number, {
-    resolve: (value: unknown) => void;
-    reject: (err: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-  private tools: MCPToolDef[] = [];
-  private serverIdentity: MCPServerIdentity = {};
-  private initialized = false;
+/**
+ * Agent-side MCP client.
+ *
+ * The **stdio** half — spawn, JSON-RPC framing, initialize handshake, request
+ * timeout and cancellation — lives in the leaf package `@los/mcp-stdio`, because
+ * `@los/memory` needs it and must not depend on `@los/agent`. This class keeps
+ * only what is agent-specific:
+ *
+ *   - the remote transports (SSE / streamable-HTTP), which no non-agent consumer uses;
+ *   - `toolPolicy` / `adapterConfig`, which are agent distribution concepts;
+ *   - a `toolPolicy`-aware `callTool` override.
+ *
+ * `MCPServerConfig` here is a superset of the leaf config: extra fields are simply
+ * ignored by the leaf.
+ */
+export class MCPClient extends MCPStdioClient {
+  private remoteTransport: MCPTransport | null = null;
 
-  constructor(private config: MCPServerConfig) {
-    this.transport = createTransport(config);
-    this.transport.onMessage((msg) => this.handleMessage(msg));
+  constructor(private readonly agentConfig: MCPServerConfig) {
+    // The leaf requires a stdio command. A remote config has no command, so hand it
+    // a placeholder and swap in the real transport immediately after.
+    super({
+      command: agentConfig.command ?? 'unused-remote-transport',
+      args: agentConfig.args,
+      env: agentConfig.env,
+      serverId: agentConfig.serverId,
+    });
+    if (agentConfig.transport && agentConfig.transport !== 'stdio') {
+      this.remoteTransport = createRemoteTransport(agentConfig);
+      this.remoteTransport.onMessage((msg) => this.handleMessage(msg));
+    }
   }
 
+  /** Remote transports replace the leaf's stdio one entirely. */
   async connect(): Promise<void> {
-    await this.transport.start();
-
-    // ── Initialize handshake ──────────────────────────────
+    if (!this.remoteTransport) {
+      return super.connect();
+    }
+    await this.remoteTransport.start();
     const initResult = await this.sendRequest('initialize', {
-      protocolVersion: MCP_PROTOCOL_VERSION,
+      // Same version the leaf advertises; kept literal here so the agent's remote
+      // path does not need a second import name for one constant.
+      protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
       clientInfo: { name: 'los', version: '0.1.0' },
     });
-    const serverInfo = (initResult as any)?.serverInfo;
+    const serverInfo = (initResult as { serverInfo?: { name?: unknown; version?: unknown } })?.serverInfo;
+    const protocolVersion = (initResult as { protocolVersion?: unknown })?.protocolVersion;
     this.serverIdentity = {
       name: typeof serverInfo?.name === 'string' ? serverInfo.name : undefined,
       version: typeof serverInfo?.version === 'string' ? serverInfo.version : undefined,
-      protocolVersion: typeof (initResult as any)?.protocolVersion === 'string'
-        ? (initResult as any).protocolVersion
-        : undefined,
+      protocolVersion: typeof protocolVersion === 'string' ? protocolVersion : undefined,
     };
-    const label = serverInfo?.name ?? this.config.command ?? this.config.url ?? '?';
+    const label = serverInfo?.name ?? this.agentConfig.url ?? '?';
     log.info(`MCP connected: ${label} v${serverInfo?.version ?? '?'}`);
-
-    // Send initialized notification
-    this.sendNotification('notifications/initialized', {});
-
-    // ── Discover tools ────────────────────────────────────
-    const toolsResult = await this.sendRequest('tools/list', {});
-    this.tools = (toolsResult as any)?.tools ?? [];
+    this.remoteTransport.send({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+    const toolsResult = await this.sendRequest('tools/list', {}) as { tools?: MCPToolDef[] };
+    this.storeTools(toolsResult?.tools ?? []);
     this.initialized = true;
-    log.info(
-      `MCP [${label}] tools: ${this.tools.map(t => t.name).join(', ') || '(none)'}`,
-    );
-  }
-
-  getTools(): MCPToolDef[] {
-    return this.tools;
-  }
-
-  getServerIdentity(): MCPServerIdentity {
-    return { ...this.serverIdentity };
-  }
-
-  async callTool(name: string, args: Record<string, unknown>, options: MCPCallOptions = {}): Promise<string> {
-    if (!this.initialized) {
-      const label = this.config.command ?? this.config.url ?? '?';
-      throw new Error(`MCP client not initialized: ${label}`);
-    }
-    const result = await this.sendRequest('tools/call', {
-      name,
-      arguments: args,
-    }, options) as MCPToolCallResult;
-
-    const text = result.content
-      .map(c => {
-        if (c.type === 'text' && c.text !== undefined) return c.text;
-        if (c.type === 'resource' && c.text !== undefined) return c.text;
-        return JSON.stringify(c);
-      })
-      .join('\n');
-
-    if (result.isError) {
-      throw new Error(`MCP tool error [${name}]: ${text}`);
-    }
-
-    return text;
+    log.info(`MCP [${label}] tools: ${this.getTools().map(t => t.name).join(', ') || '(none)'}`);
   }
 
   async close(): Promise<void> {
-    for (const [id, entry] of this.pending) {
-      clearTimeout(entry.timer);
-      entry.reject(new Error('MCP client closed'));
-    }
-    this.pending.clear();
-    await this.transport.close();
+    if (this.remoteTransport) await this.remoteTransport.close();
+    return super.close();
   }
 
-  // ── JSON-RPC helpers ──────────────────────────────────
-
-  private sendRequest(
-    method: string,
-    params: Record<string, unknown>,
-    options: MCPCallOptions = {},
-  ): Promise<unknown> {
-    const id = ++this.requestId;
-    if (options.signal?.aborted) {
-      return Promise.reject(new Error(`MCP request cancelled: ${method}`));
-    }
-    return new Promise((resolve, reject) => {
-      const removeAbortListener = () => options.signal?.removeEventListener('abort', onAbort);
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        removeAbortListener();
-        reject(new Error(`MCP request timeout: ${method} (${REQUEST_TIMEOUT_MS}ms)`));
-      }, REQUEST_TIMEOUT_MS);
-
-      const onAbort = () => {
-        if (!this.pending.delete(id)) return;
-        clearTimeout(timer);
-        removeAbortListener();
-        this.sendNotification('notifications/cancelled', {
-          requestId: id,
-          reason: 'client_cancelled',
-        });
-        reject(new Error(`MCP request cancelled: ${method}`));
-      };
-
-      this.pending.set(id, {
-        resolve: (value) => { clearTimeout(timer); removeAbortListener(); resolve(value); },
-        reject: (err) => { clearTimeout(timer); removeAbortListener(); reject(err); },
-        timer,
-      });
-      options.signal?.addEventListener('abort', onAbort, { once: true });
-
-      this.transport.send({ jsonrpc: '2.0', id, method, params });
-    });
+  /**
+   * Agent view of the discovered tools.
+   *
+   * The leaf stores the same runtime shape under its own descriptor type
+   * (`inputSchema` always normalised to an object); the agent's
+   * `MCPDiscoveredTool` adds stricter `annotations`. One cast lives here, at the
+   * single boundary between the two declarations.
+   */
+  override getTools(): MCPToolDef[] {
+    return super.getTools() as unknown as MCPToolDef[];
   }
 
-  private sendNotification(method: string, params: Record<string, unknown>): void {
-    this.transport.send({ jsonrpc: '2.0', method, params });
+  /** @internal subclass hook so the remote path stores the agent descriptor type. */
+  protected override storeTools(tools: MCPToolDef[]): void {
+    super.storeTools(tools as unknown as Parameters<MCPStdioClient['storeTools']>[0]);
   }
 
-  private handleMessage(msg: JSONRPCMessage): void {
-    if (msg.id === undefined || msg.id === null) return;
-
-    const numericId = typeof msg.id === 'string' ? Number(msg.id) : msg.id;
-    if (!Number.isFinite(numericId)) return;
-
-    const entry = this.pending.get(numericId);
-    if (!entry) return;
-
-    clearTimeout(entry.timer);
-    this.pending.delete(numericId);
-
-    if (msg.error) {
-      entry.reject(new Error(`MCP error: ${msg.error.message} (code ${msg.error.code})`));
-    } else {
-      entry.resolve(msg.result);
+  /** Agent-specific: honour toolPolicy when present. */
+  async callTool(name: string, args: Record<string, unknown>, options: MCPCallOptions = {}): Promise<string> {
+    const policy = this.agentConfig.toolPolicy;
+    if (!policy || policy.allow === undefined || policy.allow.includes(name)) {
+      return super.callTool(name, args, options);
     }
+    throw new Error(`MCP tool "${name}" is not allowed by toolPolicy`);
   }
 }
 

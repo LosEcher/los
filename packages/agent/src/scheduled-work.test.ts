@@ -16,6 +16,7 @@ import {
   recordScheduledRunOutcome,
   recoverExpiredScheduledWorkRuns,
   recoverOpenScheduledWorkCircuits,
+  resetScheduledWorkCircuit,
   shouldSkipLateRun,
   transitionScheduledWorkRun,
 } from './scheduled-work/index.js';
@@ -325,6 +326,53 @@ test('circuit reports exactly one open transition at the failure threshold', asy
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
+});
+
+test('operator circuit reset restores eligibility without manufacturing a run', async () => {
+  const slot = new Date(Date.now() + 3_600_000);
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-reset-circuit-${Date.now()}`,
+    trigger: { kind: 'once', expression: slot.toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1,
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    assert.equal(opened.circuitOpened, true);
+    assert.equal(opened.schedule.circuitState, 'open');
+    assert.ok(opened.schedule.nextRunAt, 'a once-trigger schedule has a next run slot');
+    const nextRunBefore = new Date(opened.schedule.nextRunAt!).getTime();
+
+    const reset = await resetScheduledWorkCircuit({ scheduleId: schedule.id });
+    assert.equal(reset.changed, true);
+    assert.equal(reset.schedule.circuitState, 'closed');
+    assert.equal(reset.schedule.consecutiveFailures, 0);
+    // `optionalIso` 把 NULL 映射成 undefined（不是 null）——断言按实际契约写。
+    assert.equal(reset.schedule.circuitOpenedAt, undefined);
+    assert.notEqual(reset.schedule.circuitState, 'open');
+    // 重置**不改写槽位**。注意这**不等于**"重置不会导致执行"：若该排程的槽位已过期，
+    // `claimDueScheduledWorkItems`（`circuit_state IN ('closed','half_open') AND
+    // next_run_at <= now()`）会在下一个 tick 认领它 —— 那是期望行为。本用例的槽位在未来，
+    // 所以这里断言的是"槽位没被改写"这条更窄、且无条件成立的性质。
+    assert.equal(new Date(reset.schedule.nextRunAt!).getTime(), nextRunBefore);
+
+    // 幂等：已 closed 时 changed=false，且不写库。
+    const again = await resetScheduledWorkCircuit({ scheduleId: schedule.id });
+    assert.equal(again.changed, false);
+    assert.equal(again.schedule.circuitState, 'closed');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('operator circuit reset on an unknown schedule is rejected', async () => {
+  await assert.rejects(
+    () => resetScheduledWorkCircuit({ scheduleId: 'schedule-does-not-exist' }),
+    /not found/,
+  );
 });
 
 test('open circuit auto-recovers to half_open after the window and closes on a successful probe', async () => {

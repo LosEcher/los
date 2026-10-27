@@ -1,16 +1,24 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureSessionStore, loadSession } from '@los/agent/session';
 import { ensureSessionEventStore, listSessionEvents, listSessionEventsSince } from '@los/agent/session-events';
-import { projectSessionTrace, type TraceToolCallCard, type TraceTurnProjection } from '@los/agent/session-trace';
+import {
+  foldSessionTrace,
+  projectSessionTrace,
+  type TraceToolCallCard,
+  type TraceTurnProjection,
+} from '@los/agent/session-trace';
 import { listVerificationRecordsForSession, type Message, type TurnSummary } from '@los/agent';
 import { projectExecutionObservability } from '@los/agent/execution-observability';
 import { asObject, truncate } from '../../trace-utils.js';
+import { requireOperator } from '../../request-context.js';
+import { foldTraceWindow, readTraceSeed } from '../../trace-incremental.js';
 
 type TraceRouteDependencies = {
   loadSession: typeof loadSession;
   listSessionEvents: typeof listSessionEvents;
   listSessionEventsSince: typeof listSessionEventsSince;
   projectSessionTrace: typeof projectSessionTrace;
+  foldSessionTrace: typeof foldSessionTrace;
   listVerificationRecordsForSession: typeof listVerificationRecordsForSession;
   projectExecutionObservability: typeof projectExecutionObservability;
   ensureSessionStore: typeof ensureSessionStore;
@@ -22,6 +30,7 @@ const defaultDependencies: TraceRouteDependencies = {
   listSessionEvents,
   listSessionEventsSince,
   projectSessionTrace,
+  foldSessionTrace,
   listVerificationRecordsForSession,
   projectExecutionObservability,
   ensureSessionStore,
@@ -213,7 +222,8 @@ export function registerTraceRoutes(
   app: FastifyInstance,
   deps: TraceRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/sessions/:id/execution-observability', async (req) => {
+  app.get('/sessions/:id/execution-observability', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     await deps.ensureSessionEventStore();
     const [events, verificationRecords] = await Promise.all([
@@ -224,6 +234,7 @@ export function registerTraceRoutes(
   });
 
   app.get('/sessions/:id/trace', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
 
     await deps.ensureSessionStore();
@@ -264,6 +275,7 @@ export function registerTraceRoutes(
 
   // Incremental trace endpoint for live update polling
   app.get('/sessions/:id/trace/since', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
@@ -278,18 +290,26 @@ export function registerTraceRoutes(
       if (newEvents.length === 0) {
         return { sessionId: id, since, nextSince: since, messages: [], unchanged: true };
       }
-      const projection = deps.projectSessionTrace(id, newEvents);
+      const carried = readTraceSeed(id, since);
+      const windowEvents = carried ? newEvents : await deps.listSessionEvents(id, 10000);
+      const folded = foldTraceWindow(
+        { sessionId: id, since, newEvents, fullEvents: windowEvents },
+        deps.foldSessionTrace,
+      );
       const messages =
         session.messages.length > 0
-          ? buildTraceMessages({ apiMessages: session.messages, turns: session.turns, traceTurns: projection.turns })
-          : buildTraceMessagesFromEvents({ session, events: newEvents, traceTurns: projection.turns });
-      const nextSince = newEvents.reduce((max, e) => Math.max(max, e.id), since);
-      return { sessionId: id, since, nextSince, messages };
+          ? buildTraceMessages({ apiMessages: session.messages, turns: session.turns, traceTurns: folded.projection.turns })
+          : buildTraceMessagesFromEvents({ session, events: windowEvents, traceTurns: folded.projection.turns });
+      return { sessionId: id, since, nextSince: folded.nextSince, messages };
     }
 
     // since=0: full trace, same as /trace
     const events = await deps.listSessionEvents(id, 10000);
-    const projection = deps.projectSessionTrace(id, events);
+    const folded = foldTraceWindow(
+      { sessionId: id, since: 0, newEvents: events, fullEvents: events },
+      deps.foldSessionTrace,
+    );
+    const projection = folded.projection;
     const apiMessages = session.messages;
     const turns = session.turns;
     const messages =
@@ -298,14 +318,13 @@ export function registerTraceRoutes(
         : buildTraceMessagesFromEvents({ session, events, traceTurns: projection.turns });
     const maxProjectedTurn = projection.turns.reduce((max, t) => Math.max(max, t.turn), 0);
     const fallbackTurnCount = maxProjectedTurn > 0 ? maxProjectedTurn : projection.turns.length;
-    const nextSince = events.length > 0 ? events[events.length - 1].id : 0;
     return {
       sessionId: id,
       messageCount: messages.length,
       turnCount: apiMessages.length > 0 ? turns.length : fallbackTurnCount,
       messages,
       since: 0,
-      nextSince,
+      nextSince: folded.nextSince,
     };
   });
 }

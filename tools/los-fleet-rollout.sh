@@ -40,6 +40,10 @@ done
 
 # 节点表：node_id|platform|ssh_alias|remote_home|privilege
 # platform=local 表示网关主机自身（不经过 ssh）。
+# macOS 节点（本机与 M3）用**同一棵钉树、同一个标签**；钉树路径是它们的身份来源。
+MACOS_HOME="${LOS_MACOS_HOME:-/Users/echerlos/.local/share/los}"
+MACOS_LABEL="${LOS_MACOS_LABEL:-com.echerlos.los-executor}"
+
 NODES=(
   "vultr-executor|linux|vultr-r-t|/opt/los|none"
   "tencent-sin-executor|linux|tencent-sin-t|/opt/los|none"
@@ -48,7 +52,7 @@ NODES=(
   "m3pro-executor-1|macos|m3-t|/Users/echerlos/.local/share/los|none"
   "desktop-r45553o|windows|win-los|C:/los|none"
   "desktop-srsbe20|windows|desktop-srsbe20|C:/los|none"
-  "mbp-executor-1|local|||"
+  "mbp-executor-1|local||$MACOS_HOME|none"
 )
 SSHO=(-o BatchMode=yes -o ConnectTimeout=20 -o ControlPath=none -o ControlMaster=no)
 PSQL="$(command -v psql || echo /opt/homebrew/opt/postgresql@17/bin/psql)"
@@ -79,6 +83,164 @@ if [[ "$PLAN" -eq 0 ]]; then
   trap 'rm -rf "$LOCK"' EXIT
 fi
 
+# ── git 访问：在 **jj 工作区**里也能用 ──────────────────────
+# jj 的工作区目录里没有自己的 .git（VCS 存储由各工作区共享），于是 `git -C $ROOT …` 会报
+# "not a git repository"。而"从一个独立工作区当滚动源"是有意支持的用法（发布器不该只能从
+# 开发 checkout 跑），所以这里统一解析 git 目录：优先 $ROOT/.git，否则取 default 工作区的 .git。
+GIT_DIR_FOR_REPO=""
+git_dir() {
+  if [ -n "$GIT_DIR_FOR_REPO" ]; then printf '%s' "$GIT_DIR_FOR_REPO"; return; fi
+  if [ -d "$ROOT/.git" ]; then
+    GIT_DIR_FOR_REPO="$ROOT/.git"
+  else
+    local def
+    def="$(jj -R "$ROOT" workspace root --name default 2>/dev/null || true)"
+    [ -n "$def" ] && [ -d "$def/.git" ] && GIT_DIR_FOR_REPO="$def/.git"
+  fi
+  printf '%s' "$GIT_DIR_FOR_REPO"
+}
+gitr() { # git，但经共享 git 目录（工作区场景）
+  local gd; gd="$(git_dir)"
+  if [ -n "$gd" ]; then git --git-dir="$gd" "$@"; else git -C "$ROOT" "$@"; fi
+}
+
+# ── 目标来源：两条必须成立的不变量 ──────────────────────────
+# 部署走内容同步、不依赖 git push，所以"目标"是网关**工作树**的摘要快照。因此：
+#   ① 被摘要覆盖的文件必须是**已提交**状态 —— 否则会把别人（或自己）未完成的改动推给全机队；
+#   ② 目标在整个滚动期间**不得变化** —— 否则先后节点会停在不同的内容上（混合机队）。
+# 两条都在 2026-10-11 被真实打破过：另一个会话在同一 checkout 里改 packages/agent 源文件，
+# 摘要在一次 `--plan` 运行内就变了（表头 target 与 local 节点 digest 自相矛盾）。
+# 默认硬拦；确实要有意滚未提交内容时，显式设 LOS_ROLLOUT_ALLOW_DIRTY=1。
+ALLOW_DIRTY="${LOS_ROLLOUT_ALLOW_DIRTY:-0}"
+
+dirty_covered_files() {
+  local paths='tools deploy packages contracts package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json'
+  gitr status --porcelain -- $paths 2>/dev/null | cut -c4- | LC_ALL=C sort \
+    | comm -12 - <(node "$ROOT/tools/deployable-content.mjs" --files | LC_ALL=C sort)
+}
+
+head_revision() { # 工作副本当前基于哪个修订（jj 优先，退回 git）
+  jj -R "$ROOT" log -r '@-' --no-graph -T 'commit_id' 2>/dev/null \
+    || gitr rev-parse HEAD 2>/dev/null || true
+}
+merged_revision() { # 已合并修订
+  jj -R "$ROOT" log -r 'main@origin' --no-graph -T 'commit_id' 2>/dev/null \
+    || gitr rev-parse origin/main 2>/dev/null || true
+}
+
+assert_target_source() {
+  local dirty head merged
+  dirty="$(dirty_covered_files | wc -l | tr -d ' ')"
+  if [ "${dirty:-0}" -gt 0 ]; then
+    dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+    if [ "$ALLOW_DIRTY" = "1" ]; then
+      warn "rolling a DIRTY tree on purpose (LOS_ROLLOUT_ALLOW_DIRTY=1): $dirty uncommitted file(s) in scope; target '$TARGET' is a snapshot of them"
+    else
+      die "refusing to roll: $dirty uncommitted file(s) inside the digest's scope (listed above). The target would be a snapshot of a dirty tree, so the fleet would run work in progress. Commit them, or set LOS_ROLLOUT_ALLOW_DIRTY=1 if that is deliberate."
+    fi
+  fi
+  head="$(head_revision)"; merged="$(merged_revision)"
+  if [ -n "$head" ] && [ -n "$merged" ] && [ "$head" != "$merged" ]; then
+    warn "rolling content from revision ${head:0:12}, which is NOT the merged main@origin ${merged:0:12} — the fleet would run content that is not what is merged"
+  fi
+}
+
+target_now() { bash tools/los.sh build-version | tail -1; }
+
+# ── 冻结载荷：一次打包、全轮共用，并**由它定义目标** ──────────────
+# 为什么不是"检测漂移后中止"：内容同步是从**工作树**现场打包的，于是
+#   ① 每台节点都在"轮到它的那一刻"各自打包 ⇒ 一轮里前后节点可能拿到不同内容；
+#   ② 目标在开头算、载荷之后才打 ⇒ 两者可能不对应（节点摘要与目标不符才暴露）；
+#   ③ 滚到一半有写者 ⇒ 前几台停在一个修订、后几台停在另一个；而"检测到就中止"只能减少损害，
+#      已经滚过的节点不会回退（混合机队已经形成）。
+# 开头打一次包、解到快照目录、用**快照**算目标，这三条一起消失：整轮下发同一份字节，
+# 目标与载荷按构造一一对应。它与前面两道"该不该滚这份内容"的闸门正交：闸门管来源，冻结管一致性。
+PAYLOAD_TAR="$OUT_DIR/payload-latest.tar.gz"
+PAYLOAD_TREE="$OUT_DIR/payload-latest-tree"
+
+# 载荷从哪来：`revision`（默认，已合并修订）或 `worktree`（显式 opt-in，热修用）。
+# 为什么默认取修订而不是工作树：工作树是**可变的**，"机队跑的是合并过的内容"若靠"看工作树脏不脏"
+# 去逼近，就只能得到一个近似（脏检查只看被覆盖文件，且随时可能被人改回去）。直接从修订取内容之后，
+# 期望态与载荷都来自一个**不可变的命名修订** —— 这也正是设计文档第二阶段想要的形态（见 §5.2/§6），
+# 只是先落在发布器上、还没动执行器。worktree 模式保留给"有意滚未提交热修"的场景。
+ROLL_SOURCE="${LOS_ROLLOUT_SOURCE:-revision}"
+ROLL_REVISION="${LOS_ROLLOUT_REVISION:-main@origin}"
+
+resolve_revision() { # <rev-name> → commit id（jj 优先，退回 git）
+  jj -R "$ROOT" log -r "$ROLL_REVISION" --no-graph -T 'commit_id' 2>/dev/null \
+    || gitr rev-parse "$ROLL_REVISION" 2>/dev/null \
+    || true
+}
+
+freeze_payload() {
+  rm -rf "$PAYLOAD_TREE" "$PAYLOAD_TAR" "$PAYLOAD_TAR.list"
+  case "$ROLL_SOURCE" in
+    worktree)
+      bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
+        || die "cannot build the payload tarball from the worktree"
+      ;;
+    revision)
+      local rev
+      rev="$(resolve_revision)"
+      [ -n "$rev" ] || die "cannot resolve the rollout revision '$ROLL_REVISION' (fetch it, or set LOS_ROLLOUT_REVISION)"
+      # git archive 只含**被跟踪**内容 ⇒ 生成态（本地库/测试产物）天然进不来，与摘要覆盖规则一致。
+      gitr archive --format=tar "$rev" -- \
+        tools deploy packages contracts \
+        package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
+        | gzip > "$PAYLOAD_TAR" || die "cannot archive $ROLL_REVISION"
+      # 清单仍由 tar 自己派生（Windows 剪枝用），与 worktree 模式同一条规则。
+      # **必须**把 LOS_DEPLOY_TARBALL 指过去：否则工具的 tarball 子命令会从工作树重新打包、
+      # 覆盖掉刚做出来的修订包（2026-10-11 实测踩过：目标摘要变成了脏树的值）。
+      LOS_DEPLOY_TARBALL="$PAYLOAD_TAR" \
+        bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
+        || die "cannot derive the shipped manifest"
+      ;;
+    *) die "unsupported LOS_ROLLOUT_SOURCE '$ROLL_SOURCE' (expected revision or worktree)" ;;
+  esac
+  mkdir -p "$PAYLOAD_TREE"
+  tar xzf "$PAYLOAD_TAR" -C "$PAYLOAD_TREE" || die "cannot extract the payload snapshot"
+  LOS_DEPLOY_TARBALL="$PAYLOAD_TAR"; export LOS_DEPLOY_TARBALL
+  local frozen
+  frozen="$(node "$ROOT/tools/deployable-content.mjs" --root "$PAYLOAD_TREE" --digest)"
+  [ -n "$frozen" ] || die "the frozen payload has no digest — refusing to roll an unidentifiable payload"
+  if [ -n "${LOS_ROLLOUT_TARGET:-}" ] && [ "$LOS_ROLLOUT_TARGET" != "$frozen" ]; then
+    die "LOS_ROLLOUT_TARGET='$LOS_ROLLOUT_TARGET' does not match the frozen payload's digest '$frozen'; a rollout must ship the content it claims to ship"
+  fi
+  TARGET="$frozen"
+  if [ "$ROLL_SOURCE" = "revision" ]; then
+    log "payload frozen from revision ${rev:0:12} ($ROLL_REVISION)"
+  else
+    # worktree 模式：说清这一轮滚的是快照，而不是"你现在看到的工作树"
+    local live; live="$(target_now)"
+    [ "$live" = "$frozen" ] \
+      || warn "the working tree changed while the payload was being frozen (live '$live' != frozen '$frozen'): this rollout ships the frozen snapshot, not what is on disk now"
+  fi
+  LOS_DEPLOY_VERSION="$TARGET"; export LOS_DEPLOY_VERSION
+  log "payload frozen: $TARGET ($(du -h "$PAYLOAD_TAR" | cut -f1 | tr -d ' '), $(wc -l < "$PAYLOAD_TAR.list" | tr -d ' ') entries)"
+}
+
+if [ "$ROLL_SOURCE" = "worktree" ]; then
+  # worktree 模式才需要"已提交"这道闸门（内容直接来自工作树）
+  if [[ "$PLAN" -eq 1 ]]; then
+    DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
+    if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
+      warn "LOS_ROLLOUT_SOURCE=worktree and the tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
+      dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+      warn "a real rollout would refuse this (LOS_ROLLOUT_ALLOW_DIRTY=1 overrides)"
+    fi
+  else
+    assert_target_source
+  fi
+else
+  # revision 模式：内容来自命名修订，工作树脏不脏、是不是 main 都不影响这一轮滚什么。
+  # 唯一要提醒的是"你在这棵树里跑的是哪一版的发布器"。
+  log "source=revision $ROLL_REVISION (the working tree is not used as content)"
+fi
+
+# 冻结载荷（plan 也冻）：让 plan 与真滚看到**同一个目标**，否则 plan 报的是"活树现在是什么"、
+# 真滚发的是"快照是什么"，两者在有写者时不一致。
+freeze_payload
+
 # ── preflight：控制面不健康就不要开跑（它既 verify 不了也 promote 不了）──
 preflight() {
   local h
@@ -94,10 +256,27 @@ reg_version()  { q "select coalesce(version,'') from executor_nodes where node_i
 reg_status()   { q "select coalesce(status,'') from executor_nodes where node_id='$1'"; }
 reg_active()   { q "select coalesce(active_task_count,0) from executor_nodes where node_id='$1'"; }
 reg_target()   { q "select coalesce(target_version,'') from executor_nodes where node_id='$1'"; }
+reg_base_url() { q "select coalesce(base_url,'') from executor_nodes where node_id='$1'"; }
 set_target()   { "$PSQL" "$DB_URL" -c "update executor_nodes set target_version='$TARGET', updated_at=now() where node_id='$1'" >/dev/null 2>&1; }
 promote_node() { ./bin/los nodes command "$1" promote -t "$AUTH" ${OP:+--operator-token "$OP"} --reason "fleet rollout $TARGET" >/dev/null 2>&1; }
-health_version() { # ip:port
-  curl -s -m 8 "http://$1/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1
+health_version() { # base_url | ip:port
+  local target="$1"
+  case "$target" in http*) : ;; *) target="http://$target" ;; esac
+  curl -s -m 8 "${target%/}/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1
+}
+
+
+# 平台驱动：在**节点上**执行（macOS 用的是同一份脚本，本机与 M3 配置完全一致）
+#   · local：直接跑网关这份（本机）
+#   · 远端：把网关这份经 stdin 送到节点执行 —— 而不是用节点上那份，因为 drivers 在摘要排除面内，
+#     节点上的副本可能过期（它的新鲜度不参与身份判定）。
+run_driver() { # <node_id> <alias|-> <driver> <args...>
+  local nid="$1" alias_="$2" driver="$3"; shift 3
+  if [[ "$alias_" == "-" ]]; then
+    bash "$ROOT/tools/deploy-drivers/$driver" "$@"
+  else
+    ssh "${SSHO[@]}" "$alias_" "bash -s -- $(printf '%q ' "$@")" < "$ROOT/tools/deploy-drivers/$driver"
+  fi
 }
 
 # 远端摘要 = 节点自查（与 deploy-to-remote.sh digest 同一判据）
@@ -113,7 +292,9 @@ remote_digest() { # alias home privilege
 
 tool() { # alias home priv subcmd [extra...] — 统一调用仓库工具
   local a="$1" home="$2" priv="$3"; shift 3
-  LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET="$a" LOS_REMOTE_HOME="$home" \
+  # 传输默认 ssh，但**调用方可以覆盖**（local 平台用 LOS_SSH_TRANSPORT=local 在本机目录上跑
+  # 同一套步骤）。硬编码 ssh 会让 local 分支静默走到 ssh 路径上去。
+  LOS_SSH_TRANSPORT="${LOS_SSH_TRANSPORT:-ssh}" LOS_SSH_TARGET="$a" LOS_REMOTE_HOME="$home" \
   LOS_REMOTE_PRIVILEGE="$priv" LOS_SSH_OPTS='-o ControlPath=none -o ControlMaster=no' \
     bash tools/deploy-to-remote.sh "$NODE_NAME" "$@"
 }
@@ -128,7 +309,14 @@ roll_one() { # node_id platform alias home privilege
   local v st dg
   v="$(reg_version "$nid")"; st="$(reg_status "$nid")"
   case "$plat" in
-    local) dg="$(bash tools/los.sh build-version | tail -1)" ;;
+    # local 节点现在跑的是**钉树**，所以探针也必须读钉树 —— 以前读的是 checkout 的工作树，
+    # 于是 checkout 一脏（比如另一个会话在改代码）这台就恒显示 off-target（幽灵节点）。
+    local) dg="$(node "$MACOS_HOME/tools/deployable-content.mjs" --digest 2>/dev/null | tail -1)" ;;
+    # Windows：走驱动自己的 digest（内部调用 tools/deployable-content.mjs —— 与 bash 侧**同一份**
+    # 实现）。以前这里跑 `bash tools/los.sh build-version`，而 Windows 没有 bash，于是 digest
+    # 永远是空的；现在 Windows 与 Linux/macOS 用同一个判据，收敛后可以跳过。
+    # 模块还没下发时驱动明确回 `module-missing`（而不是空），照旧会触发一次滚动。
+    windows) dg="$(bash "$ROOT/tools/deploy-drivers/windows-service.sh" digest "$alias_" "$home" "" "$nid" 2>/dev/null | sed -n 's/^digest=//p' | tail -1)" ;;
     *)     dg="$(remote_digest "$alias_" "$home" "$priv")" ;;
   esac
   dg="${dg:-<no-response>}"
@@ -142,7 +330,7 @@ roll_one() { # node_id platform alias home privilege
   if [[ "$PLAN" -eq 1 ]]; then
     local action
     case "$plat" in
-      windows) action='NO DRIVER — manual (runbook: Windows Nodes)' ;;
+      windows) action="$([[ "$dg" = "$TARGET" ]] && echo 'activate+verify+promote' || echo 'sync+install+activate+verify+promote') driver" ;;
       local)   action="$([[ "$dg" = "$TARGET" ]] && echo 'restart+promote' || echo 'restart+promote (tree is the source)')" ;;
       *)       action="$([[ "$dg" = "$TARGET" ]] && echo 'restart/verify+promote' || echo 'sync+install+restart+verify+promote')" ;;
     esac
@@ -179,12 +367,15 @@ roll_one() { # node_id platform alias home privilege
       fi
       ;;
     macos)
+      # 节点侧全部交给驱动（它生成/维护 launchd plist、只重启执行器、双断言校验）。
+      # 编排器不再内联 launchd 细节 —— 见 docs/architecture/...cross-platform-content-identity-design.md
       LOS_REMOTE_NODE_ID="$nid" tool "$alias_" "$home" "$priv" sync || rc=1
-      if [[ "$rc" -eq 0 ]]; then
-        ssh "${SSHO[@]}" "$alias_" "sed -i '' 's|^LOS_VERSION=.*|LOS_VERSION=$TARGET|; s|^EXECUTOR_VERSION=.*|EXECUTOR_VERSION=$TARGET|' '$home/.env'" >/dev/null 2>&1
-        ssh "${SSHO[@]}" "$alias_" 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor' >/dev/null 2>&1 || rc=1
-        sleep 20
-      fi
+      # install 必须在这里跑：tar 只搬源码，workspace 包链接归 pnpm 管；少了它，
+      # 新增/删除 workspace 包的发布会让节点在 KeepAlive 下 ERR_MODULE_NOT_FOUND 崩溃循环。
+      [[ "$rc" -eq 0 ]] && { tool "$alias_" "$home" "$priv" install >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh install-plist "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh activate "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh verify "$home" "$MACOS_LABEL" "$TARGET" || rc=1; }
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;
     windows)
@@ -195,15 +386,41 @@ roll_one() { # node_id platform alias home privilege
         warn "  $nid: Windows driver missing ($driver)"
       else
         bash "$driver" sync     "$alias_" "$home" "$TARGET" "$nid" || rc=1
+        # install 必须在 activate 之前：tar 只搬源码，workspace 包的链接归 pnpm 管，
+        # 少了这一步新增/删除 workspace 包的发布会让节点在 nssm 下 ERR_MODULE_NOT_FOUND 崩溃循环
+        # （2026-10-11：本轮新增 @los/mcp-stdio，win-los 手工补装才恢复）。
+        [[ "$rc" -eq 0 ]] && { bash "$driver" install  "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
         [[ "$rc" -eq 0 ]] && { bash "$driver" activate "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
-        sleep 12
+        # verify 自己会等 /health 报出目标版本（内部最多 60s），这里不再睡固定时长。
         [[ "$rc" -eq 0 ]] && { bash "$driver" verify   "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
         [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       fi
       ;;
     local)
-      bash tools/los.sh restart >/dev/null 2>&1 || rc=1
-      sleep 25
+      # 本机节点与 M3 **配置完全一致**：同一棵钉树、同一个 launchd 标签、同一套驱动。
+      # 关键差别是传输走 `local`（本机目录）而不是 ssh，而且**只重启执行器** ——
+      # 以前这里是 `los.sh restart`，会连网关一起弹（两者共用 checkout）。
+      # 历史背景：mbp-executor-1 曾直接从**可编辑的 checkout** 运行 ⇒ 身份是"编辑器此刻的样子"，
+      # 且 tsx 按需加载意味着未提交改动可以不重启就进入执行路径（2026-10-11）。
+      local la="${LOS_LOCAL_ALIAS:--}"
+      # 配置漂移护栏：钉树有**自己的一份 .env**（每个节点一份配置是机队的既有约定）。
+      # 本机节点与网关同机，所以"改了 checkout 的 .env 却忘了钉树那份"是个真实的静默陷阱
+      # （密钥轮换只改一处 ⇒ 节点仍用旧 key，且没有任何信号）。这里只**比对并告警**，
+      # 不覆盖 —— 钉树的端口/身份等本来就是可以与该机网关不同的。
+      local drift
+      drift="$(
+        diff <(grep -avE '^(LOS_VERSION|EXECUTOR_VERSION)=' "$ROOT/.env" 2>/dev/null | LC_ALL=C sort) \
+             <(grep -avE '^(LOS_VERSION|EXECUTOR_VERSION)=' "$home/.env" 2>/dev/null | LC_ALL=C sort) \
+          | grep -c '^[<>]' || true
+      )"
+      [ "${drift:-0}" -eq 0 ] \
+        || warn "  $nid: pinned .env differs from $ROOT/.env in $drift line(s) (version keys excluded) — a secret/config change applied to only one of them is a silent drift"
+      LOS_SSH_TRANSPORT=local LOS_REMOTE_HOME="$home" LOS_REMOTE_PRIVILEGE=none \
+      LOS_REMOTE_NODE_ID="$nid" tool "$la" "$home" "none" sync || rc=1
+      [[ "$rc" -eq 0 ]] && { LOS_SSH_TRANSPORT=local LOS_REMOTE_HOME="$home" LOS_REMOTE_PRIVILEGE=none tool "$la" "$home" "none" install >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh install-plist "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh activate "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh verify "$home" "$MACOS_LABEL" "$TARGET" || rc=1; }
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;
   esac
@@ -235,6 +452,7 @@ processed=0
 for row in "${NODES[@]}"; do
   IFS='|' read -r nid plat alias_ home priv <<< "$row"
   [[ -n "$ONLY" && "$nid" != "$ONLY" ]] && continue
+  # 目标在轮内不会漂移：整轮下发的是 freeze_payload 冻结的那一份字节（见其注释）
   roll_one "$nid" "$plat" "$alias_" "$home" "$priv" || failed=$((failed+1))
   processed=$((processed+1))
   # canary：第一台成功后停下，等人确认再跑其余

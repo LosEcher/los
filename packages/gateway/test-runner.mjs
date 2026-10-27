@@ -3,6 +3,7 @@
 import { runPackageTests } from '../../tools/package-test-runner.mjs';
 
 const sharedProcessTestFiles = [
+  'src/routes/infrastructure/topology-routes.test.ts',
   'src/auth-middleware.test.ts',
   'src/chat-cbm-symbol-cache.test.ts',
   'src/chat-planning-disposition.test.ts',
@@ -25,6 +26,7 @@ const sharedProcessTestFiles = [
   'src/operator-gate.test.ts',
   'src/outbox-diagnostics.test.ts',
   'src/pairwise-sample-gate-routes.test.ts',
+  'src/process-identity.test.ts',
   'src/project-routes.test.ts',
   'src/project-store.test.ts',
   'src/programmatic-interface-boundary.test.ts',
@@ -37,6 +39,7 @@ const sharedProcessTestFiles = [
   'src/run-evals-pairwise-routes.test.ts',
   'src/rate-limit.test.ts',
   'src/request-context.test.ts',
+  'src/route-admission-guard.test.ts',
   'src/routes/orchestration/grok-runtime-routes.test.ts',
   'src/routes/orchestration/codex-runtime-routes.test.ts',
   'src/routes/orchestration/operator-write-routes.test.ts',
@@ -49,6 +52,7 @@ const sharedProcessTestFiles = [
   'src/ssh-config-import.test.ts',
   'src/ssh-command-runner.test.ts',
   'src/task-dead-letter-routes.test.ts',
+  'src/task-token-routes.test.ts',
   'src/tool-call-upsert.test.ts',
   'src/tool-gate-routes.test.ts',
   'src/unirun-capabilities.test.ts',
@@ -58,6 +62,8 @@ const sharedProcessTestFiles = [
 const dbBackedTestFiles = [];
 
 const isolatedDatabaseTestFiles = [
+  'src/routes/bounded-limit-params.test.ts',
+  'src/fleet-topology.test.ts',
   'src/active-session-failover.test.ts',
   'src/agent-task-graph-routes.test.ts',
   'src/artifact-routes.test.ts',
@@ -93,7 +99,9 @@ const isolatedDatabaseTestFiles = [
   'src/scenario-economics-routes.test.ts',
   'src/server-maintenance.test.ts',
   'src/session-routes.test.ts',
+  'src/task-token-heartbeat-db.test.ts',
   'src/trace-routes.test.ts',
+  'src/trace-incremental.test.ts',
 ];
 
 runPackageTests({

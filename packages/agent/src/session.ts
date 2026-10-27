@@ -103,13 +103,29 @@ export async function loadSession(id: string): Promise<SessionRecord | null> {
   return rowToSession(row);
 }
 
-export async function listSessions(limit = 20): Promise<Pick<SessionRecord, 'id' | 'createdAt' | 'updatedAt' | 'metadata'>[]> {
+/**
+ * List sessions, newest first.
+ *
+ * `scope.tenantId` (optional) restricts the projection to one tenant; the HTTP
+ * boundary passes it for authenticated non-operator principals
+ * (`resolveReadScope` in the gateway). Internal callers omit it. Tenant-only on
+ * purpose: the session projection is cross-project by design.
+ */
+export async function listSessions(
+  limit = 20,
+  scope?: { tenantId?: string },
+): Promise<Pick<SessionRecord, 'id' | 'createdAt' | 'updatedAt' | 'metadata'>[]> {
   await ensureSessionStore();
   const db = getDb();
-  const rows = await db.query<SessionRow>(
-    'SELECT * FROM sessions ORDER BY updated_at DESC LIMIT $1',
-    [limit],
-  );
+  const rows = scope?.tenantId
+    ? await db.query<SessionRow>(
+        'SELECT * FROM sessions WHERE tenant_id = $2 ORDER BY updated_at DESC LIMIT $1',
+        [limit, scope.tenantId],
+      )
+    : await db.query<SessionRow>(
+        'SELECT * FROM sessions ORDER BY updated_at DESC LIMIT $1',
+        [limit],
+      );
   return rows.rows.map(row => ({
     id: row.id,
     createdAt: toIsoString(row.created_at),

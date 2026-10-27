@@ -110,17 +110,38 @@ export function matchPainPattern(text: string): string[] {
   return hits;
 }
 
-/** 只读查询 SQLite。**不加 `-readonly`**（缺 `-shm` 的 WAL 库会以 (14) 失败）。 */
-export async function querySqlite<T>(sql: string): Promise<T[] | null> {
-  if (!existsSync(DSH_SESSION_INDEX_DB)) return null;
+/**
+ * 只读查询 SQLite。**不加 `-readonly`**（缺 `-shm` 的 WAL 库会以 (14) 失败）。
+ *
+ * `maxBuffer` 可按查询放大，**默认 64 MiB**。为什么必须能放大（2026-10-11 实测）：
+ * pain 的那条 `SELECT session_id, ts, text …` 输出 **67.8 MiB**（51079 行带正文），
+ * 刚好越过 64 MiB ⇒ `execFileAsync` 抛 `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`，
+ * 被下面的 `catch` 吞掉 ⇒ 投影报 "session-index.db unavailable or unreadable"。
+ * 那是一句**假话**：库完全可读（同一进程里 catalog 的 0.12 MiB 查询同刻成功），
+ * 真因是输出缓冲超限。这是一条会静默踩中的容量悬崖 —— 事件正文只增不减。
+ *
+ * 因此 `catch` 里**必须把真实错误打出来**（以前是裸 `catch {}`）：判"读不到"时
+ * 唯一能区分"文件不在/锁住/缓冲超限"的信息就在这条 stderr 里。
+ *
+ * `dbPath` 只为可测性存在：默认仍是那个固定的 DSH 源库；回归测试要在一个临时库上
+ * 复现"输出越过 maxBuffer"这条悬崖，不能也不该去动真库。
+ */
+export async function querySqlite<T>(
+  sql: string,
+  opts?: { maxBuffer?: number; dbPath?: string },
+): Promise<T[] | null> {
+  const dbPath = opts?.dbPath ?? DSH_SESSION_INDEX_DB;
+  if (!existsSync(dbPath)) return null;
   try {
-    const { stdout } = await execFileAsync('sqlite3', ['-json', DSH_SESSION_INDEX_DB, sql], {
-      maxBuffer: 64 * 1024 * 1024, timeout: 120_000,
+    const { stdout } = await execFileAsync('sqlite3', ['-json', dbPath, sql], {
+      maxBuffer: opts?.maxBuffer ?? 64 * 1024 * 1024, timeout: 120_000,
     });
     const trimmed = stdout.trim();
     return trimmed ? (JSON.parse(trimmed) as T[]) : [];
-  } catch {
-    return null;   // 读不到 ⇒ null（**不是**空结果）
+  } catch (err) {
+    // 保留"读不到 ⇒ null（**不是**空结果）"的语义，但不再让原因消失。
+    console.error(`[querySqlite] 读取失败（会被判成 degraded，不是空结果）: ${String(err)}`);
+    return null;
   }
 }
 

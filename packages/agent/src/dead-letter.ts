@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { getDb, withDbClient } from '@los/infra/db';
+import { getDb, withDbClient, type DbTransactionClient } from '@los/infra/db';
 import type { TaskRunRecord } from './task-runs.js';
 import {
   appendSessionEvent,
@@ -21,7 +21,15 @@ import {
 
 // ── Types ──────────────────────────────────────────────────
 
-export type DLQReason = 'lease_expired' | 'max_attempts' | 'unrecoverable_error';
+/**
+ * `outbox_exhausted` is an execution-outbox delivery that failed every allowed
+ * attempt (N=8) — see docs/architecture/2026-10-10-control-plane-truth-remediation.md §3.
+ * The `reason` column in `dead_letter_events` is plain TEXT with no CHECK, but the
+ * in-process union and the requeue partial index (`reason = 'lease_expired'`) do
+ * depend on this list, so a new member must be added here and to
+ * `isDLQReason` / `emptyReasonSummary` in dead-letter-recovery.ts.
+ */
+export type DLQReason = 'lease_expired' | 'max_attempts' | 'unrecoverable_error' | 'outbox_exhausted';
 export type DeadLetterResolution =
   | 'replaced'
   | 'superseded'
@@ -125,6 +133,13 @@ export async function ensureDeadLetterStore(): Promise<void> {
   _initialized = true;
 }
 
+// Minimal structural form of a queryable client (pg `Pool` and `PoolClient`
+// both satisfy it). Using the union directly would make `query` uncallable,
+// because pg's overloads are not mutually compatible.
+type DeadLetterQueryClient = {
+  query<R extends { id?: unknown } = any>(sql: string, params?: unknown[]): Promise<{ rows: R[] }>;
+};
+
 // ── Write ──────────────────────────────────────────────────
 
 export async function writeDeadLetterEvent(input: {
@@ -133,9 +148,17 @@ export async function writeDeadLetterEvent(input: {
   reason: DLQReason;
   originalError?: string;
   eventPayload?: Record<string, unknown>;
+  /**
+   * Optional transaction client for the INSERT only. Callers that already hold a
+   * transaction (the outbox dead-letter cap) pass theirs so the insert can be
+   * wrapped in a SAVEPOINT; the `operator_attention_required` session event below
+   * still uses its own connection on purpose — its SQL failing must not abort the
+   * caller's transaction.
+   */
+  client?: DeadLetterQueryClient;
 }): Promise<DeadLetterEventRecord> {
   await ensureDeadLetterStore();
-  const db = getDb();
+  const db: DeadLetterQueryClient = input.client ?? getDb();
   const id = `dlq-${randomUUID()}`;
   const rows = await db.query<DeadLetterRow>(
     `

@@ -2,6 +2,7 @@
  * Phase 1 real-run observability: fingerprint, turn waterfall, failure facets.
  * Consumes GET /sessions/:id/execution-observability (read-only projection).
  */
+import { decimals } from '../components/format';
 import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertTriangle } from 'lucide-react';
 import { getJson, type ExecutionObservabilityProjection, type ExecutionTurnWaterfall } from '../api';
@@ -258,8 +259,8 @@ export function summarizeWaterfall(waterfall: ExecutionTurnWaterfall[]) {
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0ms';
   if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
+  if (ms < 60_000) return `${decimals(ms / 1000, ms < 10_000 ? 1 : 0)}s`;
+  return `${decimals(ms / 60_000, 1)}m`;
 }
 
 export function formatCount(value: number): string {

@@ -176,6 +176,78 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
 }
 
 /**
+ * 从 `provider_call_telemetry` 聚合某个 provider 近期的**真实调用结果**，供健康评分使用。
+ *
+ * ## 为什么需要它（2026-10-12 实测）
+ *
+ * `computeHealthScore(provider, probe, outcomes)` 的权重是
+ * RTT 0.4 / **成功率 0.4** / 可用性 0.2；而 `outcomes` 缺失时公式走
+ * "no outcome data → benefit of the doubt"，`successRate = 1.0`。
+ * 于是「探针连得上、真实调用却 401/410」的 provider 会拿高分：实测
+ * `nvidia-nim`（410 Gone）与 `opencode-zen`（401）在 `/providers/health` 里都是 healthy。
+ *
+ * 评分器**本来就设计**了 outcomes 入参，`provider-selection.ts:37` 也真的取了它，
+ * 但**探针循环（`provider-probe.ts`）只传 probe** ⇒ 同一件事两套算法、输入不同。
+ * 本函数让探针侧用上与选择侧**同一个窗口（24h）**的同一份数据。
+ *
+ * `status` 是 HTTP 状态码，`0` 表示传输层失败（`PROVIDER_NETWORK`）。
+ * 窗口内按 `model` 分组、取调用量最大的那条（与 `ProviderRecentOutcome.model` 对齐）。
+ * **窗口内无数据时返回 `undefined`** —— 让评分器继续走"对未测 provider 宽恕"的原语义，
+ * 不给新 provider 凭空扣分。
+ */
+export async function getRecentProviderOutcomes(
+  provider: string,
+  windowHours = 24,
+): Promise<{
+  provider: string; model: string; totalTasks: number; succeeded: number; failed: number;
+  avgDurationMs: number; avgTokens: number; lastOutcomeAt: string;
+} | undefined> {
+  // `make_interval(hours => $2)` 只接受 integer；传 0.5 会抛错，而调用方把异常
+  // 当成"无数据"处理 ⇒ 静默退回宽恕。在入口挡住（2026-10-12 独立 review 指出）。
+  if (!Number.isInteger(windowHours) || windowHours <= 0) {
+    throw new Error(`getRecentProviderOutcomes: windowHours must be a positive integer, got ${windowHours}`);
+  }
+  await ensureProviderCallTelemetryStore();
+  const rows = await getDb().query<{
+    model: string | null; total: number; succeeded: number; avg_ms: number; avg_tokens: number; last_at: Date | string;
+  }>(
+    // **按 provider 全量聚合，不按 model 分组取最热的那条。**
+    // 原实现 `GROUP BY model … ORDER BY total DESC LIMIT 1` 有两个真缺陷
+    // （2026-10-12 独立 review 指出）：
+    //   1. 其余 model 的失败被整条丢掉 —— A 有 100 次 200、B 有 50 次 401 仍算 healthy，
+    //      而这是**provider 级**的健康信号；
+    //   2. 各 model 调用量接近时 `ORDER BY total DESC` 没有次级排序 ⇒ 两次探测之间
+    //      可能换一条 ⇒ **tier 抖动**。
+    // `model` 现在只作展示用，用 `model ASC` 做确定性 tiebreak。
+    `WITH window_rows AS (
+       SELECT * FROM provider_call_telemetry
+        WHERE provider = $1 AND created_at > now() - make_interval(hours => $2)
+     )
+     SELECT (SELECT model FROM window_rows GROUP BY model ORDER BY count(*) DESC, model ASC LIMIT 1) AS model,
+            count(*)::int AS total,
+            count(*) FILTER (WHERE status >= 200 AND status < 300)::int AS succeeded,
+            coalesce(avg(duration_ms), 0)::int AS avg_ms,
+            coalesce(avg((usage_json->>'totalTokens')::numeric)
+                     FILTER (WHERE usage_json->>'totalTokens' ~ '^[0-9]+$'), 0)::int AS avg_tokens,
+            max(created_at) AS last_at
+       FROM window_rows`,
+    [provider, windowHours],
+  );
+  const row = rows.rows[0];
+  if (!row || row.total === 0 || !row.model) return undefined;
+  return {
+    provider,
+    model: row.model,
+    totalTasks: row.total,
+    succeeded: row.succeeded,
+    failed: row.total - row.succeeded,
+    avgDurationMs: row.avg_ms,
+    avgTokens: row.avg_tokens,
+    lastOutcomeAt: (row.last_at instanceof Date ? row.last_at : new Date(row.last_at)).toISOString(),
+  };
+}
+
+/**
  * High-level wrapper: execute a provider fetch and record telemetry.
  * Returns the Response on success, throws AgentError on failure.
  */

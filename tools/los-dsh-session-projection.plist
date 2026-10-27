@@ -8,8 +8,13 @@
   放进 agent 调度只会把"出网/模型故障"混成"投影失败"。
 
   安装：bash tools/install-los-dsh-session-projection.sh
-  状态：bash tools/install-los-dsh-session-projection.sh --status
-  卸载：bash tools/install-los-dsh-session-projection.sh --uninstall
+  状态/卸载：同一脚本的子命令（见其 -h 输出）。
+
+  ⚠️ 这两个子命令的字面形式**故意不写在这里**：XML 注释里不允许出现连续两个连字符，
+  而 `plutil -lint` 与 launchd 都会宽松放行，只有严格解析器（plistlib / lxml / 仓内
+  scripts/check-launchd-plists.sh）拒绝 —— 于是"文档写了 CLI 用法"就变成一件
+  **谁都不会立刻发现、但全仓门禁常年红灯**的事（2026-10-11 实测：这条注释让
+  check-launchd-plists 报 2 个自有坏件）。别把它补回来。
 
   RunAtLoad=false：安装脚本会同步跑一次做验收，避免 bootstrap 时并发。
 -->
@@ -24,6 +29,22 @@
   </array>
   <key>WorkingDirectory</key>
   <string>__LOS_ROOT__</string>
+  <!-- 触发（2026-10-13 起双触发，主次分明）：
+       主 = 订阅 session-index 完成时写的**心跳**（见下 WatchPaths）。为什么必须这样：
+            本作业与 com.echerlos.dsh-session-index **都是独立 3600s 定时、无排序**，实测会交错
+            （10:05 那次投影读的是 09:38 那轮 ingest 的库，而下一次 ingest 10:38 还没跑）
+            ⇒ 投影可能把上一个小时的数据当成"当前"。订阅心跳让它的触发时刻**必然晚于**
+            上游完成，竞态被结构性消除（该项目前由脚本内的心跳断言兜住，三态可判）。
+       次 = StartInterval 3600：**保留的兜底**。事件不保证被处理（watch 会合并、
+            也可能因守护重启漏掉），而且"事件没来"与"作业挂了"必须可区分 ——
+            由脚本内的上游心跳断言（超过阈值即 exit 1 不投影）承担。
+       预算是安全的：本作业有单实例锁（mkdir），且 RunAtLoad=false
+            ⇒ 重复触发不会叠加写入，reload 也不会触发一次执行。 -->
+  <key>WatchPaths</key>
+  <array>
+    <string>__HOME__/.dsh/storages/ledger/session-index-ingest.heartbeat</string>
+  </array>
+
   <key>StartInterval</key>
   <integer>3600</integer>
   <key>RunAtLoad</key>

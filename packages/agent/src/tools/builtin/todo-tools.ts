@@ -41,6 +41,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: ['tenantId', 'projectId'],
     riskLevel: 'L0',
     permissions: ['todo:read'],
     timeoutMs: 30_000,
@@ -115,6 +116,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: ['tenantId', 'projectId', 'sessionId', 'taskRunId'],
     riskLevel: 'L1',
     permissions: ['todo:write'],
     timeoutMs: 30_000,
@@ -185,6 +187,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: ['sessionId', 'taskRunId'],
     riskLevel: 'L1',
     permissions: ['todo:write'],
     timeoutMs: 30_000,
@@ -216,6 +219,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['todo:write'],
     timeoutMs: 30_000,
@@ -246,6 +250,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['todo:write'],
     timeoutMs: 30_000,
@@ -282,6 +287,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L1',
     permissions: ['todo:write'],
     timeoutMs: 30_000,

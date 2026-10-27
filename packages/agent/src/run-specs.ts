@@ -14,11 +14,13 @@ import {
   normalizeRunContractMetadata,
   shouldSkipPlanApprovalGate,
   validatePhaseTransition,
+  type PhaseExemptReason,
   type PlanStep,
   type RunContractMetadata,
   type RunContractMetadataInput,
   type RunPhase,
 } from './run-contract.js';
+import { applyPhaseTrackingGate } from './run-phase-gate.js';
 import {
   normalizePlanForPersistence,
   validatePlanForApproval,
@@ -97,6 +99,12 @@ export interface CreateRunSpecInput {
   timeoutMs?: number;
   mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
   runContract?: RunContractMetadataInput;
+  /**
+   * Declared exemption for a writing path that knowingly has no phase. Omitted
+   * means "nobody declared one", which the gate records as `writer_omitted`
+   * rather than rejecting the write.
+   */
+  phaseExemptReason?: PhaseExemptReason;
 }
 
 import { _validateRunSpecResult, type RunSpecResult } from './run-spec-result.js';
@@ -183,7 +191,11 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
   }
   await ensureRunSpecStore();
   const db = getDb();
-  const runContract = normalizeRunContractMetadata(input.runContract);
+  // Phase gate runs on the RAW contract: normalization drops unknown phase
+  // strings, so an illegal phase must be rejected before it can be rewritten as
+  // "no phase at all" and counted as legacy history.
+  const runContract = applyPhaseTrackingGate(input.runContract, input.phaseExemptReason);
+  const normalizedContract = normalizeRunContractMetadata(runContract);
   const rows = await db.query<RunSpecRow>(
     `
     INSERT INTO run_specs (
@@ -216,7 +228,7 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       input.maxLoops ?? 20,
       input.timeoutMs ?? null,
       JSON.stringify(input.mcpServers ?? []),
-      JSON.stringify(runContract ?? {}),
+      JSON.stringify(normalizedContract ?? {}),
       input.gatewayId ?? null,
       input.parentRunSpecId ?? null,
     ],
@@ -225,9 +237,9 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
   await seedVerificationRequirementsForRunSpec({
     runSpecId: record.id,
     sessionId: record.sessionId,
-    planRevision: runContract?.planRevision ?? 1,
-    requiredChecks: runContract?.requiredChecks,
-    verifications: runContract?.verifications,
+    planRevision: normalizedContract?.planRevision ?? 1,
+    requiredChecks: normalizedContract?.requiredChecks,
+    verifications: normalizedContract?.verifications,
   });
   return record;
 }
@@ -239,13 +251,20 @@ export async function loadRunSpec(id: string): Promise<RunSpecRecord | null> {
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
 
-export async function listRunSpecs(limit = 50): Promise<RunSpecRecord[]> {
+/** run specs 列表；服务端过滤 projectId/status/since，数字入参等价 `{limit}`（2026-10-11 审计 §2 P0）。 */
+export async function listRunSpecs(
+  options: number | { limit?: number; projectId?: string; status?: string; since?: string } = {},
+): Promise<RunSpecRecord[]> {
   await ensureRunSpecStore();
-  const db = getDb();
-  const rows = await db.query<RunSpecRow>(
-    'SELECT * FROM run_specs ORDER BY updated_at DESC LIMIT $1',
-    [limit],
-  );
+  const opts = typeof options === 'number' ? { limit: options } : options;
+  const params: unknown[] = []; const where: string[] = [];
+  const add = (value: unknown, sql: string) => { params.push(value); where.push(sql.replace('$', `$${params.length}`)); };
+  if (opts.projectId) add(opts.projectId, 'project_id = $');
+  if (opts.status) add(opts.status, 'status = $');
+  if (opts.since) add(opts.since, 'created_at > $');
+  params.push(opts.limit ?? 50);
+  const sql = `SELECT * FROM run_specs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY updated_at DESC LIMIT $${params.length}`;
+  const rows = await getDb().query<RunSpecRow>(sql, params);
   return rows.rows.map(rowToRecord);
 }
 

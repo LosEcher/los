@@ -85,6 +85,10 @@ const sharedProcessTestFiles = [
   'src/runtime-adapter/grok.test.ts',
   'src/runtime-task.test.ts',
   'src/scenario-economics-runner.test.ts',
+  'src/scheduler/node-check-runner.test.ts',
+  // placement 只用一个假节点 HTTP server，不写库（`recentSelectionCounts` 读不到库时按空处理），
+  // 因此不需要 isolated 组；未分类会被 runner 报 "unclassified test" 并跳过。
+  'src/scheduler/placement.test.ts',
   'src/scheduler/ssh-client.test.ts',
   'src/security-gate.test.ts',
   'src/semantic-eviction.test.ts',
@@ -111,12 +115,18 @@ const sharedProcessTestFiles = [
   'src/tools/builtin/worker-ask-tools.test.ts',
   'src/tools/external/mcp-client.test.ts',
   'src/tools/registry.test.ts',
+  'src/los-tool-broker-approval.test.ts',
+  'src/los-tool-broker-scope.test.ts',
+  'src/tools/core/registry-policy.test.ts',
+  'src/runtime-env.test.ts',
 ];
 
 // Full isolated classification always includes every group so local
 // `pnpm --filter @los/agent test` and CI group lanes share one inventory.
 const isolatedGroupA = [
   'src/agent-task-graph.test.ts',
+  'src/scheduler-decision-ledger.test.ts',
+  'src/scheduler-decision-window.test.ts',
   'src/daily-agent-quality.test.ts',
   'src/dead-letter.test.ts',
   'src/eval-probes.test.ts',
@@ -127,9 +137,9 @@ const isolatedGroupA = [
   'src/external-tool-summary.test.ts',
   'src/feed-analysis-integration.test.ts',
   'src/governance-adversarial-review.test.ts',
-  'src/governance-language-audit.test.ts',
   'src/governance-drift-sweeper.test.ts',
   'src/governance-jobs.test.ts',
+  'src/governance-language-audit.test.ts',
   'src/governance-sweep-todos.test.ts',
   'src/governance-sweeper.test.ts',
   'src/governance-wake.test.ts',
@@ -137,15 +147,18 @@ const isolatedGroupA = [
   'src/managed-workspaces.test.ts',
   'src/mcp-credential-resolver.test.ts',
   'src/mcp-distribution.test.ts',
+  'src/message-router/handlers-run-contract.test.ts',
   'src/metrics-activity.test.ts',
   'src/metrics-trends.test.ts',
+  'src/node-commands-execute.test.ts',
   'src/slo-report.test.ts',
-  'src/message-router/handlers-run-contract.test.ts',
 ];
 
 const isolatedGroupB = [
   'src/operator-control-consumer.test.ts',
+  'src/operator-control-drain.test.ts',
   'src/operator-control.test.ts',
+  'src/operator-event-stream-cursor.test.ts',
   'src/pi-kernel-envelope.test.ts',
   'src/pi-kernel-input.test.ts',
   'src/pre-action-evidence.test.ts',
@@ -183,6 +196,7 @@ const isolatedGroupC = [
   'src/scheduler/task-heartbeat.test.ts',
   'src/self-check.test.ts',
   'src/service-instances.test.ts',
+  'src/session.integration.test.ts',
   'src/skill-distribution.test.ts',
   'src/stream-checkpoints.test.ts',
   'src/stream-lease.test.ts',
@@ -193,6 +207,7 @@ const isolatedGroupC = [
   'src/todos.test.ts',
   'src/tool-call-recovery.test.ts',
   'src/verification-records.test.ts',
+  'src/verification-runner.test.ts',
   'src/work-items.test.ts',
   'src/work-items/revision-loop.test.ts',
   'src/worker-messages.test.ts',
@@ -201,6 +216,7 @@ const isolatedGroupC = [
   'src/session-events-effective.test.ts',
   'src/session-subagents.test.ts',
   'src/dsh-session-catalog.test.ts',
+  'src/dsh-session-sqlite-buffer.test.ts',
   'src/dsh-event-outbox.test.ts',
 ];
 

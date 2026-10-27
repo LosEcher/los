@@ -161,7 +161,7 @@ export function setupAgentRun(
   }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode, config.planningTransport);
   const sandboxMode = config.sandboxMode ?? 'workspace-write';
-  const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode);
+  const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode, config.deniedToolPermissions);
   const signal = config.signal;
 
   // Inject provider context window into compression config so large-window
@@ -195,6 +195,7 @@ export function setupAgentRun(
     runContractMetadata: config.runContractMetadata,
     workspaceRoot: config.workspaceRoot,
     parentToolMode: config.toolMode,
+    executionMode: config.executionMode,
     // AP6: inherit parent trace/request/run-spec for cross-agent correlation
     traceId: config.traceId,
     requestId: config.requestId,
@@ -212,7 +213,9 @@ export function setupAgentRun(
   // Register background agent query/kill/list tools
   registerAgentQueryKillTools(tools, { tenantId: config.tenantId, projectId: config.projectId });
 
-  const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
+  const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent, {
+    persist: config.eventPersistence !== 'callback',
+  });
 
   return {
     log,

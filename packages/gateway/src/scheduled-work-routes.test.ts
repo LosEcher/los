@@ -52,6 +52,7 @@ test("scheduled work routes preview, enforce operator writes, and expose history
         };
       },
       retry: async () => { throw new Error("not used"); },
+      resetCircuit: async () => { throw new Error("not used"); },
       approve: async () => ({
         id: "schedule-run-2", scheduleId: schedule.id, scheduledFor: "2026-07-20T01:00:00.000Z",
         triggerKind: "manual", status: "succeeded", attemptCount: 1, maxAttempts: 2,
@@ -88,6 +89,23 @@ test("scheduled work routes preview, enforce operator writes, and expose history
       assert.equal(created.statusCode, 201);
       assert.equal(created.json().schedule.id, schedule.id);
       assert.equal(createdInput?.runTemplate.templateId, "morning_inbox_digest");
+
+      // 回归（2026-10-11 D1）：路由**不得**把 read-only 静默改写成 project-write。
+      // 原样透传后由 validateScheduledExecutionRunTemplate 拒绝（policy 测试 + 真机 E2E 各覆盖一层）。
+      await app.inject({
+        method: "POST", url: "/scheduled-work-items",
+        headers: { "x-los-operator-token": "operator-token" },
+        payload: {
+          title: "Read-only execution must not be upgraded", trigger: schedule.trigger,
+          templateId: "scheduled_execution", projectId: "los", goalTemplate: "noop",
+          toolMode: "read-only", sandboxMode: "sandbox",
+          workspaceRoot: "/opt/los/los-workspace",
+          editableSurfaces: ["/opt/los/los-workspace/.smoke"],
+          requiredChecks: ["uname -s"],
+          executor: { enabled: true, nodeId: "node34-executor-1" },
+        },
+      });
+      assert.equal(createdInput?.runTemplate.toolMode, "read-only");
 
       const feedCreated = await app.inject({
         method: "POST", url: "/scheduled-work-items",
@@ -149,6 +167,7 @@ test("GET /scheduled-work-items forwards excludeRetired when no status is set", 
       listRuns: async () => [],
       trigger: async () => { throw new Error("unexpected"); },
       retry: async () => { throw new Error("unexpected"); },
+      resetCircuit: async () => { throw new Error("unexpected"); },
       approve: async () => { throw new Error("unexpected"); },
       deny: async () => { throw new Error("unexpected"); },
       execute: async () => "succeeded",
@@ -192,6 +211,7 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
       listRuns: async () => [],
       trigger: async () => { throw new Error("unexpected"); },
       retry: async () => { throw new Error("unexpected"); },
+      resetCircuit: async () => { throw new Error("unexpected"); },
       approve: async () => { throw new Error("unexpected"); },
       deny: async () => { throw new Error("unexpected"); },
       execute: async () => { throw new Error("unexpected"); },
@@ -233,7 +253,7 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
           workspaceRoot: "/opt/los/los-workspace",
           toolMode: "all",
           sandboxMode: "sandbox",
-          executor: { enabled: true, nodeId: "node34-executor-1", nodeUrls: ["http://100.68.106.96:8090"] },
+          executor: { enabled: true, nodeId: "node34-executor-1", requiredNodeId: "node34-executor-1", nodeUrls: ["http://100.68.106.96:8090"] },
           trigger: { kind: "interval", expression: "6h", timezone: "Asia/Shanghai" },
         },
       });
@@ -244,6 +264,7 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
       assert.equal(created.runTemplate.toolMode, "all");
       assert.equal(created.runTemplate.sandboxMode, "sandbox");
       assert.equal(created.runTemplate.executor.nodeId, "node34-executor-1");
+      assert.equal(created.runTemplate.executor.requiredNodeId, "node34-executor-1");
       assert.deepEqual(created.runTemplate.executor.nodeUrls, ["http://100.68.106.96:8090"]);
 
       const badSandbox = await app.inject({
@@ -282,6 +303,7 @@ test("PATCH /scheduled-work-items/:id forwards flat runTemplate fields as a part
       listRuns: async () => [],
       trigger: async () => { throw new Error("unexpected"); },
       retry: async () => { throw new Error("unexpected"); },
+      resetCircuit: async () => { throw new Error("unexpected"); },
       approve: async () => { throw new Error("unexpected"); },
       deny: async () => { throw new Error("unexpected"); },
       execute: async () => "succeeded",
@@ -326,6 +348,7 @@ test("PATCH rejects nested runTemplate (flat fields only)", async () => {
       listRuns: async () => [],
       trigger: async () => { throw new Error("unexpected"); },
       retry: async () => { throw new Error("unexpected"); },
+      resetCircuit: async () => { throw new Error("unexpected"); },
       approve: async () => { throw new Error("unexpected"); },
       deny: async () => { throw new Error("unexpected"); },
       execute: async () => "succeeded",
@@ -361,6 +384,7 @@ test("workspaceRoot accepts Windows drive-letter absolute paths", async () => {
       listRuns: async () => [],
       trigger: async () => { throw new Error("unexpected"); },
       retry: async () => { throw new Error("unexpected"); },
+      resetCircuit: async () => { throw new Error("unexpected"); },
       approve: async () => { throw new Error("unexpected"); },
       deny: async () => { throw new Error("unexpected"); },
       execute: async () => "succeeded",

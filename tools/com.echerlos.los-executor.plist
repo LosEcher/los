@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 由 tools/deploy-drivers/macos-launchd.sh install-plist 生成；勿手工编辑（改动会在下次滚动被覆盖）。 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.echerlos.los-executor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/Library/Application Support/fnm/aliases/default/bin/node</string>
+    <string>__HOME__/.local/share/los/packages/executor/node_modules/tsx/dist/cli.mjs</string>
+    <string>__HOME__/.local/share/los/packages/executor/src/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>__HOME__/.local/share/los</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>__HOME__</string>
+    <key>PATH</key><string>__HOME__/.cargo/bin:__HOME__/Library/pnpm:__HOME__/Library/Application Support/fnm/aliases/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/.local/share/los/.los-runtime/executor-launchd.out.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/.local/share/los/.los-runtime/executor-launchd.err.log</string>
+</dict>
+</plist>

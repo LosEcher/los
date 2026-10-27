@@ -36,8 +36,13 @@
   与 execution-observability-panel.test.mjs 同模式）+ agent
   `metrics-trends.test.ts`（真实 DB 聚合断言：P50/P95 区间、错误率、加权
   usageFill、环比）；web check / build / 55 既有测试 / 结构门禁全绿。
-- 实测数据：20 泳道 / 58 条块的时间线；519 节点 835 边的证据图折叠为
+- 实测数据：20 泳道 / 58 条块的时间线；519 节点的证据图折叠为
   2 可视节点 + 折叠计数；9 趋势卡片 + 18 sparkline + 27 环比。
+  > ⚠️ **2026-10-12 更正**：原文写"835 边"。对同一 run
+  > （`run-session-1786812126523-1786812126525`）实测为 **670 边**
+  > （`has_task_run:1 / has_session_event:479 / parent_event:114 / has_tool_call_state:76`），
+  > 且按 `layerIndex(node.kind) <= 3` 过滤后**只剩 1 条可见边**（835 的构造路径未找到）。
+  > 另见 `TOPOLOGY-VISUALIZATION-PLACEMENT-AND-DESIGN-2026-10-12.md`（母仓）§3 F9。
 
 ### P0 — Activity 并发时间线（AgentsView 对标，2026-08-16，change `xtysloxk`）
 
@@ -103,7 +108,7 @@ Phase 4 完成，方案四视图全部落地。剩余增强见 §8（搜索 UI �
 - **轨迹可显示**：`/sessions/:id/trace`（+since 增量）、`/sessions/:id/execution-observability`
   （waterfall / fingerprint / failureFacets）、`/diagnostics/:traceId`（跨表聚合 +
   span 树）。
-- **拓扑缺可视化**：`/runs/:id/inspect` 返回完整证据图（7 类节点、11 类边），
+- **拓扑缺可视化**：`/runs/:id/inspect` 返回完整证据图（7 类节点、**12 类边**），
   web 端无图渲染页面 —— 最大空白。
 
 本方案目标：在 los web 补齐 **agent 执行可视化**，包括会话级轨迹时间线、
@@ -264,8 +269,12 @@ Honeycomb agent timeline、AutoGen/LangGraph Studio、Dify/Flowise 等。
 
 - **节点**：run_spec / task_run / session_event / tool_call_state /
   verification_record / agent_task / task_attempt（现有 7 类），按类型着色与图标。
-- **边**：has_task_run / emitted_event / parent_event / depends_on / attempt_ran_as /
-  attempt_verified_by / attempt_used_tool_state（现有 11 类），线型/虚线区分。
+- **边**：has_task_run / has_session_event / has_tool_call_state / has_verification_record /
+  has_agent_task / has_task_attempt / emitted_event / depends_on / attempt_ran_as /
+  attempt_verified_by / attempt_used_tool_state / parent_event（现有 **12 类**，
+  以 `packages/agent/src/runtime-evidence-graph.ts:23-35` 的联合为准；
+  本行 2026-10-12 更正：原写 7 项 / "11 类"，且与 `topology-panel.tsx` 的 `EDGE_COLORS`（12 键）不一致），
+  线型/虚线区分。
 - **布局**：run_spec 根居中 → 左列 task_runs → 右列 agent_task DAG（depends_on 边），
   session_events 按时间序瀑布排列在下部；tool_call_state 与 verification 挂靠
   task_run。

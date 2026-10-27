@@ -38,6 +38,11 @@ import { createTelegramUpdateProcessor, prepareTelegramPolling, runTelegramPolli
 import { createTelegramWebhookHandler, startTelegramWebhook } from './telegram-webhook.js';
 import { ensureTelegramActionStore } from './telegram-action-store.js';
 import { startTelegramHealthServer } from './health-server.js';
+import {
+  decideOperatorEventStreamResume,
+  loadOperatorEventStreamCursor,
+  saveOperatorEventStreamCursor,
+} from '@los/agent/operator-event-stream-cursor';
 import { loadConfig } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
 
@@ -55,6 +60,12 @@ const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEBHOOK_PORT = Number(process.env.TELEGRAM_WEBHOOK_PORT ?? 0);
 const POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL ?? 5000);
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
+/** Bounded catch-up (D11): a cursor older than this skips the backlog instead of replaying it. */
+const SSE_MAX_CATCHUP_MS = Number(process.env.SSE_MAX_CATCHUP_MS ?? 15 * 60_000);
+/** Durable cursor identity for this channel consumer (see operator-event-stream-cursor). */
+const TELEGRAM_STREAM_CONSUMER = 'telegram';
+/** How often the durable cursor is flushed while the stream is live. */
+const SSE_CURSOR_FLUSH_MS = Number(process.env.SSE_CURSOR_FLUSH_MS ?? 5_000);
 const HEALTH_PORT = Number(process.env.TELEGRAM_HEALTH_PORT ?? 3002);
 const WEBHOOK_BIND_HOST = '127.0.0.1';
 
@@ -194,8 +205,20 @@ async function connectSSE(): Promise<void> {
   sseConnected = false;
 
   try {
-    const url = `${LOS_GATEWAY_URL}/operator/events/live`;
-    console.log(`Connecting to SSE: ${url}`);
+    // Resume from the durable cursor. Without this the endpoint defaults to
+    // `since=0` and replays the whole operator history on every reconnect (D11).
+    const stored = await loadOperatorEventStreamCursor(TELEGRAM_STREAM_CONSUMER).catch(err => {
+      console.error(`SSE cursor load failed (falling back to tail): ${err?.message ?? err}`);
+      return null;
+    });
+    const resume = decideOperatorEventStreamResume({
+      lastEventId: stored?.lastEventId ?? 0,
+      updatedAtMs: stored?.updatedAtMs ?? null,
+      nowMs: Date.now(),
+      maxCatchupMs: SSE_MAX_CATCHUP_MS,
+    });
+    const url = `${LOS_GATEWAY_URL}/operator/events/live?${resume.query}`;
+    console.log(`Connecting to SSE: ${url} (${resume.mode}: ${resume.reason})`);
 
     const res = await fetch(url, {
       headers: losHeaders({ 'Accept': 'text/event-stream' }),
@@ -214,6 +237,10 @@ async function connectSSE(): Promise<void> {
     let buffer = '';
     let currentEvent = '';
     let currentData = '';
+    // Highest event id seen on this connection, flushed to the durable cursor on a
+    // throttle and once more when the connection ends.
+    let pendingCursor = 0;
+    let lastFlushMs = Date.now();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -224,7 +251,10 @@ async function connectSSE(): Promise<void> {
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        if (line.startsWith('event: ')) {
+        if (line.startsWith('id: ')) {
+          const id = Number(line.slice(4).trim());
+          if (Number.isFinite(id) && id > pendingCursor) pendingCursor = id;
+        } else if (line.startsWith('event: ')) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith('data: ')) {
           currentData = line.slice(6).trim();
@@ -235,6 +265,19 @@ async function connectSSE(): Promise<void> {
           currentData = '';
         }
       }
+
+      if (pendingCursor > 0 && Date.now() - lastFlushMs >= SSE_CURSOR_FLUSH_MS) {
+        lastFlushMs = Date.now();
+        await saveOperatorEventStreamCursor(TELEGRAM_STREAM_CONSUMER, pendingCursor).catch(err => {
+          console.error(`SSE cursor save failed (will retry on the next flush): ${err?.message ?? err}`);
+        });
+      }
+    }
+
+    if (pendingCursor > 0) {
+      await saveOperatorEventStreamCursor(TELEGRAM_STREAM_CONSUMER, pendingCursor).catch(err => {
+        console.error(`SSE cursor save failed on disconnect: ${err?.message ?? err}`);
+      });
     }
   } catch (err: any) {
     if (err.name === 'AbortError') return;

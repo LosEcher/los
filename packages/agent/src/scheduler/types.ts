@@ -70,12 +70,28 @@ export interface ScheduledExecutorConfig {
   enabled?: boolean;
   nodeUrls?: readonly string[];
   agentKey?: string;
+  /** Soft preference: influences candidate ordering, but may fall through. */
   nodeId?: string;
+  /**
+   * Hard pin: the selected executor must be this node. Missing/offline/
+   * non-candidate nodes fail the dispatch instead of falling through to another
+   * executor. Use this for operator-placed runs; `nodeId` alone is only a
+   * preference and must not be documented as a guarantee.
+   */
+  requiredNodeId?: string;
   leaseMs?: number;
   heartbeatMs?: number;
   requiresBuild?: boolean;
   requiresDeploy?: boolean;
   requiredCapabilities?: readonly ExecutorCapabilityRequirement[];
+  /**
+   * S7：`portable` 表示**本任务不依赖工作区文件**（如只读的舰队/节点巡检、纯计算任务），
+   * 于是"节点上有没有这个工作区"不再是门槛，只要节点可达就可参与轮转。
+   * 不写 = `verify`：必须证明工作区在节点本地存在。
+   */
+  workspacePolicy?: 'verify' | 'portable';
+  /** S7：见 ConfigSchema `executor.placementPolicy`（不写则取全局配置）。 */
+  placementPolicy?: 'health' | 'verified-rotate';
 }
 
 export type ExecutorCapabilityRequirement =
@@ -85,11 +101,46 @@ export type ExecutorCapabilityRequirement =
   | 'sandbox'
   | 'network_egress'
   | 'heavy_task_safe'
-  | 'deploy_safe';
+  | 'deploy_safe'
+  // 2026-10-11：机队本就在上报、且跨设备工作流真正需要的能力，此前**既不可要求、又被静默丢弃**
+  // （cantool 的 M3→M1 产物搬运需要 artifact_transfer；远端派发需要 run_agent）。
+  | 'run_agent'
+  | 'artifact_transfer'
+  | 'node_command_runner'
+  | 'file_sync_scan'
+  | 'file_sync_deep_verify';
+
+/**
+ * 可要求能力的**运行时单一清单**（与上面的类型同源）。`satisfiesCapability` 的判定是
+ * "节点上报值为 true"（sandbox 例外：需要具体后端字符串），因此这里只列可布尔判定的键。
+ */
+const EXECUTOR_CAPABILITY_REQUIREMENTS: readonly ExecutorCapabilityRequirement[] = [
+  'workspace_read', 'workspace_write', 'shell', 'sandbox', 'network_egress',
+  'heavy_task_safe', 'deploy_safe',
+  'run_agent', 'artifact_transfer', 'node_command_runner', 'file_sync_scan', 'file_sync_deep_verify',
+];
+
+export function listExecutorCapabilityRequirements(): ExecutorCapabilityRequirement[] {
+  return [...EXECUTOR_CAPABILITY_REQUIREMENTS];
+}
+
+export function isExecutorCapabilityRequirement(value: unknown): value is ExecutorCapabilityRequirement {
+  return typeof value === 'string' && (EXECUTOR_CAPABILITY_REQUIREMENTS as readonly string[]).includes(value);
+}
 
 export interface ExecutorPlacementIntent {
   toolMode?: 'all' | 'project-write' | 'read-only';
   sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
+  /**
+   * 本任务的工作区（节点本地路径）。S7 起它是**候选资格的一部分**：默认策略下，
+   * 只有"这个路径确实在节点本地存在"的节点才算候选——在此之前路由完全不看工作区，
+   * 选出来的节点可能根本读不到文件。
+   */
+  workspaceRoot?: string;
+  /** 见 ConfigSchema `executor.workspacePolicy`。 */
+  workspacePolicy?: 'verify' | 'portable';
+  /** 见 ConfigSchema `executor.placementPolicy`。 */
+  placementPolicy?: 'health' | 'verified-rotate';
 }
 
 export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {

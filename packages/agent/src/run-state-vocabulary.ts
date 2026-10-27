@@ -46,6 +46,29 @@ export interface RunStateProjection {
     pendingVerificationRecordIds: string[];
   };
   recovery: ToolCallRecoveryDecision;
+  /**
+   * 落点事实（**观测面**）。
+   *
+   * 为什么放进 state：证据图（B 层）此前只有 run_spec/task_run/agent_task/attempt 的结构关系，
+   * 没有任何"这次实际落在哪台机器、用了哪家模型、工作区在哪"的字段 ⇒ 图上无法回答
+   * "这个 run 跑在哪"，也就无法与机队（A 层）对齐。
+   *
+   * 口径与边界（三条都是刻意的）：
+   *   · 取自 `task_runs`（**观测**），不是 `run_specs.node_id`（声明面，且该列结构上不可达：
+   *     放置路径不建 run_spec，实测 711/711 为 NULL）；
+   *   · 值**原样保留**、不做归一化：`gateway-local`（网关进程内执行）与未登记 id 都照实出现，
+   *     否则"字段被当成两种东西用"这个症状会被抹掉；
+   *   · 缺失**不补默认值**：没有落点的 task run 只体现在 `taskRunsWithoutNode` 的计数里。
+   */
+  placement: {
+    /** 去重后的落点 node id（稳定升序，便于断言与比对）。 */
+    nodeIds: string[];
+    providers: string[];
+    models: string[];
+    workspaceRoots: string[];
+    /** 观测面缺失的条数（>0 表示有 task run 没有记录落点——如实暴露，不猜）。 */
+    taskRunsWithoutNode: number;
+  };
 }
 
 export interface BuildRunStateProjectionInput {
@@ -69,6 +92,10 @@ export async function readRunStateProjection(runSpecId: string): Promise<RunStat
     verificationRecords,
     recovery,
   });
+}
+
+function uniqueSorted(values: readonly (string | undefined | null)[]): string[] {
+  return [...new Set(values.map(value => (typeof value === 'string' ? value.trim() : '')).filter(Boolean))].sort();
 }
 
 export function buildRunStateProjection(input: BuildRunStateProjectionInput): RunStateProjection {
@@ -141,6 +168,13 @@ export function buildRunStateProjection(input: BuildRunStateProjectionInput): Ru
   });
 
   return {
+    placement: {
+      nodeIds: uniqueSorted(input.taskRuns.map(task => task.nodeId)),
+      providers: uniqueSorted(input.taskRuns.map(task => task.provider)),
+      models: uniqueSorted(input.taskRuns.map(task => task.model)),
+      workspaceRoots: uniqueSorted(input.taskRuns.map(task => task.workspaceRoot)),
+      taskRunsWithoutNode: input.taskRuns.filter(task => !task.nodeId).length,
+    },
     runSpecId: input.runSpec.id,
     sessionId: input.runSpec.sessionId,
     phase: input.runSpec.status,

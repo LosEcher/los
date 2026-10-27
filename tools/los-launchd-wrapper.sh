@@ -30,6 +30,32 @@ export PATH="$HOME/.cargo/bin:$HOME/Library/pnpm:$HOME/Library/Application Suppo
 mkdir -p "$LOG_DIR"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
+# ── 凭据从 Keychain 注入进程环境（2026-10-15）────────────────────────────────
+# 为什么：本仓纪律是「明文只出现在 ① 进程环境/fd ② 目标程序内存」。而 los 的 `.env` 里曾有
+# 3 把明文（LOS_OPERATOR_TOKEN / LOS_AUTH_TOKEN / EXECUTOR_AGENT_KEY），它们同时是
+# dsfolder/.credential-hygiene/registry.json 里 `los-env` 面（plaintext=12）的一部分。
+# 注入之后，轮换只需改 Keychain + 重启，**不必再动任何文件**。
+#
+# Keychain service 约定：
+#   los-operator-token / los-auth-token / los-executor-key          ← 当前值
+#   <同名>-previous                                                 ← 轮换窗口的上一把
+# 窗口语义见 dsfolder/runbooks/credential-rotation-3-secrets-2026-10-15.md §2：
+# 网关同时接受「当前值 或 上一把」，且 `*_PREVIOUS` **不能单独授权**（主键缺失一律 401）。
+#
+# ⚠️ 未装对应 Keychain 项时**静默跳过**：回落到 `.env`/既有环境，绝不阻断启动。
+INJECTED=""
+inject_keychain() {
+  local svc="$1" var="$2" v
+  v="$(security find-generic-password -s "$svc" -a "$USER" -w 2>/dev/null || true)"
+  if [ -n "$v" ]; then export "$var=$v"; INJECTED="$INJECTED $var"; fi
+}
+inject_keychain los-operator-token          LOS_OPERATOR_TOKEN
+inject_keychain los-auth-token              LOS_AUTH_TOKEN
+inject_keychain los-executor-key            EXECUTOR_AGENT_KEY
+inject_keychain los-operator-token-previous LOS_OPERATOR_TOKEN_PREVIOUS
+inject_keychain los-auth-token-previous     LOS_AUTH_TOKEN_PREVIOUS
+inject_keychain los-executor-key-previous   EXECUTOR_AGENT_KEY_PREVIOUS
+
 # EXECUTOR_ENABLED 缺省视为 true(los.sh 同语义:仅显式 false 时禁用)。
 is_executor_enabled() {
   local val
@@ -37,26 +63,45 @@ is_executor_enabled() {
   [ "${val:-true}" != "false" ]
 }
 
+# 执行器是否由**独立 launchd 任务**托管(2026-10-11:mbp-executor-1 改为从钉树
+# ~/.local/share/los 运行,标签 com.echerlos.los-executor,由 deploy-drivers/macos-launchd.sh 安装)。
+#
+# 为什么这个开关是必需的,而不是"顺手加一下":本 wrapper 的职责是"不健康就 los.sh start",
+# 而 los.sh start **也会拉起执行器** —— 于是钉树执行器一起,两者就抢 8090:先起来的那个活,
+# 另一个反复 bind 失败,节点表现成随机重启。所以本 wrapper 在外部托管时必须:
+#   ① 不检查 8090(它的健康由那个 launchd 任务负责);
+#   ② 只用 los.sh start-gateway,绝不用 los.sh start。
+executor_is_external() { [ "${LOS_EXECUTOR_EXTERNAL:-0}" = "1" ]; }
+
 http_ok() {
   local url="$1"
   [ "$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" = "200" ]
 }
 
-log "wrapper started (pid $$, interval=${INTERVAL_SECONDS}s)"
+log "wrapper started (pid $$, interval=${INTERVAL_SECONDS}s; keychain injected:${INJECTED:- (none)})"
 
 while true; do
   gw_ok=false
   ex_ok=false
+  external=false
+  executor_is_external && external=true
   http_ok "http://127.0.0.1:8080/health" && gw_ok=true
-  if is_executor_enabled; then
+  if [ "$external" = true ]; then
+    ex_ok=true   # 由独立 launchd 任务负责,本 wrapper 不看也不拉
+  elif is_executor_enabled; then
     http_ok "http://127.0.0.1:8090/health" && ex_ok=true
   else
     ex_ok=true
   fi
 
   if [ "$gw_ok" = false ] || [ "$ex_ok" = false ]; then
-    log "unhealthy gateway=$gw_ok executor=$ex_ok — running los.sh start"
-    ( cd "$ROOT" && ./tools/los.sh start ) >> "$LOG" 2>&1
+    if [ "$external" = true ]; then
+      log "unhealthy gateway=$gw_ok (executor is externally supervised) — running los.sh start-gateway"
+      ( cd "$ROOT" && ./tools/los.sh start-gateway ) >> "$LOG" 2>&1
+    else
+      log "unhealthy gateway=$gw_ok executor=$ex_ok — running los.sh start"
+      ( cd "$ROOT" && ./tools/los.sh start ) >> "$LOG" 2>&1
+    fi
     log "start finished rc=$?"
   fi
   sleep "$INTERVAL_SECONDS"

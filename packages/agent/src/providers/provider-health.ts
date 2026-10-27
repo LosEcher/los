@@ -1,7 +1,7 @@
 /**
  * @los/agent/providers/provider-health — Health-aware provider scoring.
  *
- * ADR 0031: Computes a composite health score from three weighted signals:
+ * ADR 0043: Computes a composite health score from three weighted signals:
  *   - RTT (40%): Latest probe RTT from provider-probe.ts, linearly normalized
  *   - Success rate (40%): succeeded/total ratio from scheduler-decision-ledger (24h)
  *   - Availability (20%): Whether the provider is reachable (probe healthy flag)
@@ -11,8 +11,11 @@
  *   0.5-0.8 → degraded — usable but prefer alternatives
  *   < 0.5 → unhealthy — skip if alternatives exist, log alert
  *
- * When no data is available (no probe, no outcomes), the score defaults to
- * 0.5 (degraded, neutral — doesn't penalize unprobed providers).
+ * Cold start is a composition, not a 0.5 default: with no probe the RTT component
+ * is 0.5 (weight 0.4), with no outcomes the success component is 1.0 (weight 0.4),
+ * and with no probe the availability component is 0.5 (weight 0.2) — a composite of
+ * 0.7, which `classifyTier` maps to `degraded`. Read the components, not a single
+ * "default 0.5".
  */
 
 import type { ProbeResult } from './provider-probe.js';
@@ -62,6 +65,57 @@ export interface HealthScore {
 
 export type HealthTier = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
 
+/**
+ * **原因桶**：把 tier 拆成"为什么"。
+ *
+ * 唯一实现 —— `/providers/health` 的 `reason`（每个 provider）与 `reasons`（直方图）都从这里来。
+ *
+ * 为什么需要：`tier` 只有四档，但同一个 `degraded` 可能是①RTT 慢 ②成功率低 ③探针不可达，
+ * 三者的处置完全不同（换线路 / 查上游错误 / 查探针协议）；台账只记 tier 时，读表的人只能
+ * 重新逐条翻 `details`。这与 dsfolder 门禁侧的 `reasons` 同一纪律：**状态被压平，原因就丢了**。
+ *
+ * 纪律：每个 provider **恰好**落一个桶（桶和恒等于 provider 数）；桶名可枚举、可 grep。
+ * **冷启动（既无探针也无成功率）必须落 `cold:*`，绝不许落 `healthy:*`** ——
+ * 那是"判不了冒充通过"，与本项目反复登记的反模式同族。
+ */
+export function healthReason(score: HealthScore): string {
+  const { hasProbe, hasOutcomes, probeHealthy } = score.details;
+  if (!hasProbe && !hasOutcomes) return 'cold:no-signal';
+  // 探针**明确不可达**时，"不可达"是直接原因：它同时把 rttScore 拖成 0（探针没 RTT 可量），
+  // 若按"加权最弱"机械比较，rtt 会赢过 unavailable 而给出误导性的原因。所以优先判它。
+  if (probeHealthy === false) return `${score.tier}:unavailable`;
+  return `${score.tier}:${weakestSignal(score.components)}`;
+}
+
+/** 加权后最弱（对分数拖累最大）的那一项。纯函数，仅为 `healthReason` 服务。 */
+function weakestSignal(c: HealthScoreComponents): 'rtt' | 'success-rate' | 'unavailable' {
+  const deficit = {
+    rtt: (1 - c.rttScore) * 0.4,
+    'success-rate': (1 - c.successRate) * 0.4,
+    unavailable: (1 - c.availabilityScore) * 0.2,
+  } as const;
+  let best: keyof typeof deficit = 'rtt';
+  for (const k of Object.keys(deficit) as Array<keyof typeof deficit>) {
+    if (deficit[k] > deficit[best]) best = k;
+  }
+  return best;
+}
+
+/**
+ * 按原因分桶计数。桶和 == 输入长度（`/providers/health` 里当不变量用，防"漏桶"与"重复计"）。
+ * 空数组返回 `{}` —— 调用方必须把"探针还没产出分数"与"分数全是 green"分开表达，
+ * 不要把空直方图当通过（见 `provider-health-route.ts` 的 `degraded`）。
+ */
+export function histogramByHealthReason(scores: HealthScore[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of scores) {
+    const k = healthReason(s);
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
+
 // ── In-memory score cache (filled by probe loop) ────────
 
 const healthScoreCache = new Map<string, HealthScore>();
@@ -91,7 +145,7 @@ export function _resetHealthScoreCacheForTests(): void {
 /** RTT values at or above this are scored 0.0 */
 const RTT_MAX_MS = 5000;
 
-/** Weights per ADR 0031 */
+/** Weights per ADR 0043 */
 const WEIGHT_RTT = 0.4;
 const WEIGHT_SUCCESS = 0.4;
 const WEIGHT_AVAILABILITY = 0.2;

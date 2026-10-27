@@ -27,6 +27,7 @@ import {
 import { _GLOBAL_PRE_ACTION_SESSION_ID } from '@los/agent/pre-action-evidence';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { getLogger } from '@los/infra/logger';
+import { requireOperator } from '../../request-context.js';
 
 export type ToolGateRouteDependencies = {
   createPreActionFailureEvidence: typeof createPreActionFailureEvidence;
@@ -189,6 +190,7 @@ export function registerToolGateRoutes(
 
   // ── PreToolUse gate ────────────────────────────────────
   app.post('/operator/tool-gate', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = (req.body ?? {}) as ToolGateRequest;
 
     if (!body.callId || !body.toolName) {
@@ -244,6 +246,7 @@ export function registerToolGateRoutes(
   // ── PostToolUse feedback ───────────────────────────────
   // Agent reports tool execution result so los can learn failure patterns.
   app.post('/operator/tool-feedback', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = (req.body ?? {}) as {
       callId: string;
       toolName: string;
@@ -312,6 +315,7 @@ export function registerToolGateRoutes(
 
   // ── Add/remove fragile files (operator management) ─────
   app.post('/operator/tool-gate/fragile-files', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = (req.body ?? {}) as {
       action: 'add' | 'remove';
       paths: string[];

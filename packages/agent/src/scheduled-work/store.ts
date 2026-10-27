@@ -23,7 +23,7 @@ const CLAIMED_ACTIVE_SQL = "('claimed','running','awaiting_approval')";
 
 const LEGAL_TRANSITIONS: Record<ScheduledWorkRunStatus, ScheduledWorkRunStatus[]> = {
   queued: ['claimed', 'skipped', 'cancelled'],
-  claimed: ['running', 'awaiting_approval', 'skipped', 'failed', 'cancelled'],
+  claimed: ['running', 'awaiting_approval', 'skipped', 'succeeded', 'failed', 'cancelled'],
   running: ['claimed', 'succeeded', 'no_op', 'failed', 'cancelled'],
   awaiting_approval: ['claimed', 'queued', 'cancelled'],
   failed: ['claimed'],
@@ -484,6 +484,61 @@ export async function recoverOpenScheduledWorkCircuits(input: {
     [new Date(now.getTime() - CIRCUIT_RECOVERY_WINDOW_MS)],
   );
   return rows.rows.map(scheduleFromRow);
+}
+
+/**
+ * 操作者手动重置断路（open/half_open → closed）。
+ *
+ * ## 为什么需要它
+ *
+ * `recoverOpenScheduledWorkCircuits` 只在 **`CIRCUIT_RECOVERY_WINDOW_MS`（24h）** 之后把
+ * `open` 变成 `half_open`，而 `PATCH /scheduled-work-items/:id` 不接受 `circuitState`
+ * ⇒ **"原因已修好"与"作业能再跑"之间有最多 24 小时的静默空窗，且没有合规的手动手段**。
+ * 2026-10-12 实测：NAS34 巡检的病因（节点本地解析不出 provider）已修，但
+ * `POST /scheduled-work-items/:id/trigger` 仍被 `409 schedule circuit is open` 挡下。
+ *
+ * ## 语义（有意保守）
+ *
+ * - **只对 `open`/`half_open` 生效**；已 `closed` 时返回 `changed:false` 且不写库
+ *   （幂等，也不会去重置一个健康计数的东西）。
+ * - 归零 `consecutive_failures`、清 `circuit_opened_at` ⇒ 下一次失败要**重新累计到
+ *   `failure_threshold`** 才再断路，而不是"一次失败立刻又开"。
+ * - **不改写 `next_run_at`**：重置只恢复"可以再跑"的资格，不移动槽位。⚠️ 但**这不等于
+ *   "重置不会导致一次执行"** —— `claimDueScheduledWorkItems` 的条件是
+ *   `circuit_state IN ('closed','half_open') AND next_run_at <= now()`，所以**若该槽位已经
+ *   过期**，due 扫描会在下一个 tick 就认领它。那是**期望行为**（操作者重置通常正是为了让它
+ *   按正常 due 语义跑起来），但它不是"什么都不会发生"。反过来，槽位尚未到期时确实不会因为
+ *   重置而提前跑。要"重置且立刻跑"请显式调 `/trigger`。
+ *   （此注释由 2026-10-12 的一次独立对抗性 review 更正：原写法把上面这条**条件**说成了
+ *   无条件保证。更正后同步修了 PR #347 描述里的同一句话。）
+ * - 并发沿用 `recordScheduledRunOutcome` 的乐观并发：`WHERE circuit_state=$2` 携带读到的
+ *   状态，另一个写者会被检测到而不是被覆盖。
+ *
+ * ## 已知边界（诚实声明，不是缺陷掩盖）
+ *
+ * 并发下"谁改的"会被合并：若 A、B 同时重置，A 的 UPDATE 命中（open→closed），B 的
+ * attempt 0 命中 0 行、attempt 1 读到 closed 而返回 `changed:false`。此时 B 的调用者
+ * 无法区分"本来就是 closed"与"别人刚关掉"。**后置条件（circuit 已 closed）两种情况都成立**，
+ * 且路由会把 `circuitState` 一并回给调用者，所以调用方总能读到真实末态 —— 这也是为什么
+ * 这里不为此加锁：重置的目标状态是幂等的，区分"谁改的"没有可执行的后果。
+ */
+export async function resetScheduledWorkCircuit(input: {
+  scheduleId: string;
+}): Promise<{ schedule: ScheduledWorkItem; changed: boolean }> {
+  await ensureScheduledWorkStore();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await loadScheduledWorkItem(input.scheduleId);
+    if (!current) throw new Error('schedule not found');
+    if (current.circuitState === 'closed') return { schedule: current, changed: false };
+    const rows = await getDb().query<ScheduledWorkRow>(
+      `UPDATE scheduled_work_items
+         SET circuit_state='closed',consecutive_failures=0,circuit_opened_at=NULL,updated_at=now()
+       WHERE id=$1 AND circuit_state=$2 RETURNING *`,
+      [input.scheduleId, current.circuitState],
+    );
+    if (rows.rows[0]) return { schedule: scheduleFromRow(rows.rows[0]!), changed: true };
+  }
+  throw new Error('scheduled work circuit changed concurrently');
 }
 
 export async function recordScheduledRunOutcome(input: {

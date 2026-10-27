@@ -58,6 +58,7 @@ export function registerWebSearchTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['web:read'],
     timeoutMs: 30_000,
@@ -175,6 +176,7 @@ export function registerWebFetchTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['web:read'],
     timeoutMs: 30_000,
@@ -321,6 +323,7 @@ export function registerHttpRequestTool(registry: ToolRegistry): void {
       },
     },
   }, {
+    scope: [],
     riskLevel: 'L0',
     permissions: ['web:read', 'web:write'],
     timeoutMs: 60_000,
