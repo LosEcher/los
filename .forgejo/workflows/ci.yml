@@ -75,7 +75,7 @@ jobs:
           proxy="${HTTPS_PROXY:-${https_proxy:-}}"
           no_proxy="${NO_PROXY:-${no_proxy:-}}"
           echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/-/ping) \
             || { echo "registry preflight failed (curl exit $?)"; exit 1; }
           [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
           echo "registry preflight ok"
@@ -197,7 +197,7 @@ jobs:
           proxy="${HTTPS_PROXY:-${https_proxy:-}}"
           no_proxy="${NO_PROXY:-${no_proxy:-}}"
           echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/-/ping) \
             || { echo "registry preflight failed (curl exit $?)"; exit 1; }
           [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
           echo "registry preflight ok"
@@ -330,7 +330,7 @@ jobs:
           proxy="${HTTPS_PROXY:-${https_proxy:-}}"
           no_proxy="${NO_PROXY:-${no_proxy:-}}"
           echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/-/ping) \
             || { echo "registry preflight failed (curl exit $?)"; exit 1; }
           [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
           echo "registry preflight ok"
@@ -415,7 +415,7 @@ jobs:
           proxy="${HTTPS_PROXY:-${https_proxy:-}}"
           no_proxy="${NO_PROXY:-${no_proxy:-}}"
           echo "proxy=${proxy:-<none>} no_proxy=${no_proxy:-<none>}"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/pnpm) \
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/-/ping) \
             || { echo "registry preflight failed (curl exit $?)"; exit 1; }
           [ "$code" = "200" ] || { echo "registry preflight HTTP $code"; exit 1; }
           echo "registry preflight ok"

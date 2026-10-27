@@ -10,6 +10,8 @@ import {
   selectHealthiest,
   isUnhealthy,
   isHealthierThan,
+  healthReason,
+  histogramByHealthReason,
 } from './provider-health.js';
 import type { ProbeResult } from './provider-probe.js';
 import type { ProviderRecentOutcome } from './provider-health.js';
@@ -226,5 +228,61 @@ describe('isHealthierThan', () => {
     const b = computeHealthScore('b', probe({ rttMs: 500 }), outcomes());
     assert.equal(isHealthierThan(a, b), false);
     assert.equal(isHealthierThan(b, a), false);
+  });
+});
+
+// ── healthReason / histogramByHealthReason（原因桶）────────
+//
+// 判据：tier 只有四档，原因桶必须把"RTT 慢 / 成功率低 / 探针不可达"分开，
+// 且**冷启动绝不许落进 healthy:* / pass:** —— 那是"判不了冒充通过"。
+describe('healthReason（原因桶）', () => {
+  it('冷启动（无探针无成功率）落 cold:*，不是 healthy:*', () => {
+    const s = computeHealthScore('cold');
+    const reason = healthReason(s);
+    assert.equal(reason, 'cold:no-signal');
+    // 负向控制：这是本项目最怕的形态——"没有数据"被读成"健康"
+    assert.equal(reason.startsWith('healthy:'), false, 'cold start must NOT read as healthy');
+  });
+
+  it('探针不可达 ⇒ unhealthy:unavailable', () => {
+    const s = computeHealthScore('down', probe({ healthy: false, rttMs: 0 }), outcomes());
+    assert.equal(s.tier, 'unhealthy');
+    assert.equal(healthReason(s), 'unhealthy:unavailable');
+  });
+
+  it('探针健康但 RTT 很慢 ⇒ degraded:rtt（不是 success-rate）', () => {
+    const s = computeHealthScore('slow', probe({ rttMs: 4500 }), outcomes());
+    assert.equal(s.tier, 'degraded');
+    assert.equal(healthReason(s), 'degraded:rtt');
+  });
+
+  it('RTT 正常但成功率低 ⇒ degraded:success-rate（区分于 rtt）', () => {
+    const s = computeHealthScore('failing', probe({ rttMs: 50 }), outcomes({ totalTasks: 10, succeeded: 0, failed: 10 }));
+    assert.equal(s.tier, 'degraded');
+    assert.equal(healthReason(s), 'degraded:success-rate');
+  });
+
+  it('全绿 ⇒ healthy:*（且两个健康 provider 不会落进同一个"最弱"以外的桶）', () => {
+    const s = computeHealthScore('ok', probe({ rttMs: 100 }), outcomes({ totalTasks: 10, succeeded: 10 }));
+    assert.equal(s.tier, 'healthy');
+    assert.equal(healthReason(s).startsWith('healthy:'), true);
+  });
+
+  it('直方图桶和 == provider 数（漏桶/重复计都会红）', () => {
+    const scores = [
+      computeHealthScore('cold'),
+      computeHealthScore('down', probe({ healthy: false, rttMs: 0 }), outcomes()),
+      computeHealthScore('slow', probe({ rttMs: 4500 }), outcomes()),
+      computeHealthScore('failing', probe({ rttMs: 50 }), outcomes({ totalTasks: 10, succeeded: 0 })),
+      computeHealthScore('ok', probe({ rttMs: 100 }), outcomes()),
+    ];
+    const h = histogramByHealthReason(scores);
+    const sum = Object.values(h).reduce((a, b) => a + b, 0);
+    assert.equal(sum, scores.length);
+    assert.equal(Object.keys(h).length, new Set(scores.map((s) => healthReason(s))).size);
+  });
+
+  it('空输入 ⇒ 空直方图（调用方必须用 degraded 表达，不能当"全绿"）', () => {
+    assert.deepEqual(histogramByHealthReason([]), {});
   });
 });
